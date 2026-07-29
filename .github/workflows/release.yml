@@ -1,0 +1,84 @@
+name: Build and publish desktop release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            platform: macos-latest
+            args: "--target universal-apple-darwin --bundles dmg,app"
+          - name: Windows x64
+            platform: windows-latest
+            args: "--bundles msi,nsis"
+          - name: Linux x64
+            platform: ubuntu-22.04
+            args: "--bundles appimage,deb"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux desktop dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: desktop
+
+      - name: Build and attach installers
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_BUNDLE_MACOS_SIGNING_IDENTITY: ${{ matrix.platform == 'macos-latest' && '-' || '' }}
+        with:
+          projectPath: desktop
+          tagName: v__VERSION__
+          releaseName: "SingRight 准唱 v__VERSION__"
+          releaseBody: |
+            SingRight 准唱首个预览版。
+
+            - 实时麦克风音高检测
+            - 逐音校准、连续跟唱、整曲复盘
+            - `.singright.json` 曲谱导入
+            - 录音上传分析和本地录音保存
+            - 移调、首音定调、A4 基准和容差设置
+
+            本版本尚未进行商业代码签名。首次打开时，系统可能要求你在安全设置中确认。
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.args }}

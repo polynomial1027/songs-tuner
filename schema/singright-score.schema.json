@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/polynomial1027/songs-tuner/main/schema/singright-score.schema.json",
+  "title": "SingRight Score",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "metadata", "tempo", "timeSignature", "tuning", "notes"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": "singright-score" },
+    "version": { "const": 1 },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+        "title": { "type": "string", "minLength": 1 },
+        "artist": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "tempo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bpm"],
+      "properties": { "bpm": { "type": "number", "minimum": 20, "maximum": 300 } }
+    },
+    "timeSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["beats", "beatUnit"],
+      "properties": {
+        "beats": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "beatUnit": { "enum": [1, 2, 4, 8, 16] }
+      }
+    },
+    "tuning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["referenceHz", "tonicMidi"],
+      "properties": {
+        "referenceHz": { "type": "number", "minimum": 400, "maximum": 480 },
+        "tonicMidi": { "type": "integer", "minimum": 0, "maximum": 127 }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "midi", "beat", "durationBeats"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "midi": {
+            "oneOf": [
+              { "type": "integer", "minimum": 0, "maximum": 127 },
+              { "type": "null" }
+            ]
+          },
+          "beat": { "type": "number", "minimum": 0 },
+          "durationBeats": { "type": "number", "exclusiveMinimum": 0 },
+          "numeral": { "type": "string" },
+          "lyric": { "type": "string" }
+        }
+      }
+    }
+  }
+}

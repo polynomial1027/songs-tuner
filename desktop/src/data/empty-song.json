@@ -1,0 +1,14 @@
+{
+  "format": "singright-score",
+  "version": 1,
+  "metadata": {
+    "id": "empty-song-template",
+    "title": "我的第二首曲目",
+    "artist": "",
+    "description": "空白曲目模板：点击“导入曲谱”替换它。"
+  },
+  "tempo": { "bpm": 80 },
+  "timeSignature": { "beats": 4, "beatUnit": 4 },
+  "tuning": { "referenceHz": 440, "tonicMidi": 60 },
+  "notes": []
+}
