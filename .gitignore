@@ -13,6 +13,7 @@ website/node_modules/
 website/.next/
 website/.vinext/
 website/dist/
+website/pages-dist/
 website/.wrangler/
 website/outputs/
 website/work/

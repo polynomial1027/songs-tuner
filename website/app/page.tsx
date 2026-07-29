@@ -1,8 +1,10 @@
+import { sitePath } from "./site-path";
+
 export default function Home() {
   return (
     <main>
       <nav className="site-nav wrap">
-        <a className="site-brand" href="/">
+        <a className="site-brand" href={sitePath()}>
           <span className="brand-wave"><i /><i /><i /></span>
           <span><strong>SingRight</strong><small>准唱</small></span>
         </a>
@@ -10,7 +12,7 @@ export default function Home() {
           <a href="#modes">练习模式</a>
           <a href="#format">曲谱格式</a>
           <a href="https://github.com/polynomial1027/songs-tuner" target="_blank" rel="noreferrer">GitHub</a>
-          <a className="nav-download" href="/download">免费下载 <span>↗</span></a>
+          <a className="nav-download" href={sitePath("download")}>免费下载 <span>↗</span></a>
         </div>
       </nav>
 
@@ -20,7 +22,7 @@ export default function Home() {
           <h1>把每一个音，<br /><em>唱到点上。</em></h1>
           <p>SingRight 用麦克风实时听见你的音高。逐个音磨准、跟着时值连续唱，或录完整首再集中纠错。</p>
           <div className="hero-actions">
-            <a className="button primary" href="/download">下载 SingRight <span>↓</span></a>
+            <a className="button primary" href={sitePath("download")}>下载 SingRight <span>↓</span></a>
             <a className="button secondary" href="https://github.com/polynomial1027/songs-tuner" target="_blank" rel="noreferrer">查看源代码 <span>↗</span></a>
           </div>
           <div className="platform-line">
@@ -162,14 +164,14 @@ export default function Home() {
 
       <section className="final-cta wrap">
         <div><span>READY WHEN YOU ARE</span><h2>下一次开口，<br />比这一次更准。</h2></div>
-        <div><a className="button primary" href="/download">免费下载 SingRight <span>↓</span></a><small>MIT 开源 · macOS / Windows / Linux</small></div>
+        <div><a className="button primary" href={sitePath("download")}>免费下载 SingRight <span>↓</span></a><small>MIT 开源 · macOS / Windows / Linux</small></div>
       </section>
 
       <footer>
         <div className="wrap">
-          <a className="site-brand" href="/"><span className="brand-wave"><i /><i /><i /></span><span><strong>SingRight</strong><small>准唱</small></span></a>
+          <a className="site-brand" href={sitePath()}><span className="brand-wave"><i /><i /><i /></span><span><strong>SingRight</strong><small>准唱</small></span></a>
           <p>练准每一个音。</p>
-          <div><a href="/download">下载</a><a href="https://github.com/polynomial1027/songs-tuner">GitHub</a><a href="https://github.com/polynomial1027/songs-tuner/blob/main/LICENSE">MIT License</a></div>
+          <div><a href={sitePath("download")}>下载</a><a href="https://github.com/polynomial1027/songs-tuner">GitHub</a><a href="https://github.com/polynomial1027/songs-tuner/blob/main/LICENSE">MIT License</a></div>
         </div>
       </footer>
     </main>

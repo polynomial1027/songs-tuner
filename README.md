@@ -2,6 +2,8 @@
 
 SingRight 是一款面向 macOS、Windows 和 Linux 的开源唱歌音准训练器。它通过麦克风在本机实时检测音高，并根据导入的统一曲谱进行逐音、连续跟唱和整曲复盘。
 
+产品与下载页面：[polynomial1027.github.io/songs-tuner](https://polynomial1027.github.io/songs-tuner/)
+
 ## 已实现
 
 - 实时麦克风音高检测与音分偏差显示

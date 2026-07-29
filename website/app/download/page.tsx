@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { sitePath } from "../site-path";
 import DownloadsClient from "./DownloadsClient";
 
 export const metadata: Metadata = {
@@ -10,12 +11,12 @@ export default function DownloadPage() {
   return (
     <main className="download-page">
       <nav className="site-nav wrap">
-        <a className="site-brand" href="/">
+        <a className="site-brand" href={sitePath()}>
           <span className="brand-wave"><i /><i /><i /></span>
           <span><strong>SingRight</strong><small>准唱</small></span>
         </a>
         <div className="nav-links">
-          <a href="/">返回首页</a>
+          <a href={sitePath()}>返回首页</a>
           <a href="https://github.com/polynomial1027/songs-tuner" target="_blank" rel="noreferrer">GitHub</a>
         </div>
       </nav>
@@ -39,9 +40,9 @@ export default function DownloadPage() {
       </section>
       <footer>
         <div className="wrap">
-          <a className="site-brand" href="/"><span className="brand-wave"><i /><i /><i /></span><span><strong>SingRight</strong><small>准唱</small></span></a>
+          <a className="site-brand" href={sitePath()}><span className="brand-wave"><i /><i /><i /></span><span><strong>SingRight</strong><small>准唱</small></span></a>
           <p>练准每一个音。</p>
-          <div><a href="/">首页</a><a href="https://github.com/polynomial1027/songs-tuner">GitHub</a><a href="https://github.com/polynomial1027/songs-tuner/issues">问题反馈</a></div>
+          <div><a href={sitePath()}>首页</a><a href="https://github.com/polynomial1027/songs-tuner">GitHub</a><a href="https://github.com/polynomial1027/songs-tuner/issues">问题反馈</a></div>
         </div>
       </footer>
     </main>
