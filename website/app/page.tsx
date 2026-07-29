@@ -21,7 +21,7 @@ export default function Home() {
         <div className="hero-copy">
           <div className="hero-kicker"><i /> 跨平台 · 音频只在本机处理</div>
           <h1>把每一个音，<br /><em>唱到点上。</em></h1>
-          <p>SingRight 用麦克风实时听见你的音高。直接在五线谱上打谱、对齐参考音频，再逐个音磨准或录完整首集中纠错。</p>
+          <p>SingRight 用麦克风实时听见你的音高。用键盘在五线谱与简谱的固定槽中打谱、对齐参考音频，再逐个音磨准或录完整首集中纠错。</p>
           <div className="hero-actions">
             <a className="button primary" href={sitePath("download")}>下载 SingRight <span>↓</span></a>
             <a className="button secondary" href="https://github.com/polynomial1027/songs-tuner" target="_blank" rel="noreferrer">查看源代码 <span>↗</span></a>
@@ -72,11 +72,11 @@ export default function Home() {
         <div className="composer-grid wrap">
           <div className="composer-copy">
             <span>WRITE IT. HEAR IT. SING IT. / 从打谱到练唱</span>
-            <h2>不用写 JSON，<br />直接在谱面上创作。</h2>
-            <p>点一下谱线就能输入音符，歌词、拍点、时值和简谱音级都在同一个工作台里完成。保存后立刻进入音准练习，不需要转换工具。</p>
+            <h2>不用写 JSON，<br />按顺序把旋律打进去。</h2>
+            <p>按 Enter 开始录入，1–5 选择时值，再用 Q 到 ] 的十二个实体键连续输入音高。固定槽与小节容量会自动校验，歌词、时值和简谱音级都在同一个工作台里完成。</p>
             <div className="composer-features">
-              <article><b>01</b><span><strong>点谱与键盘录入</strong><small>鼠标、屏幕钢琴或 A–G 快捷键</small></span></article>
-              <article><b>02</b><span><strong>完整记谱属性</strong><small>谱号、调号、拍号、附点、休止和歌词</small></span></article>
+              <article><b>01</b><span><strong>十二音键盘录入</strong><small>1–5 选时值，Q 到 ] 输入音高</small></span></article>
+              <article><b>02</b><span><strong>严格小节容量</strong><small>固定槽、拍号校验与标准休止符</small></span></article>
               <article><b>03</b><span><strong>边听边打谱</strong><small>参考音频波形、裁剪、速度与时间偏移</small></span></article>
               <article><b>04</b><span><strong>专业格式互通</strong><small>SingRight、MusicXML 与 MIDI 导出</small></span></article>
             </div>
@@ -88,8 +88,8 @@ export default function Home() {
             </div>
             <div className="composer-window-body">
               <aside>
-                <small>输入工具</small>
-                <div><b>↖<i>选择</i></b><b className="chosen">♪<i>音符</i></b><b>休<i>休止</i></b></div>
+                <small>键盘录入</small>
+                <div><b className="chosen">↵<i>开始</i></b><b>1–5<i>时值</i></b><b>Q–]<i>十二音</i></b></div>
                 <small>音符时值</small>
                 <div className="duration-tools"><b>○</b><b>◯│</b><b className="chosen">♩</b><b>♪</b><b>♬</b></div>
                 <small>升降记号</small>
@@ -200,7 +200,7 @@ export default function Home() {
         <div className="control-copy">
           <span>YOUR KEY, YOUR RANGE / 你的调</span>
           <h2>不必勉强唱原调。</h2>
-          <p>按半音自由升降，或者直接唱出第一个基准音，让 SingRight 自动固定后续所有音。还可在 430–450 Hz 之间调整 A4。</p>
+          <p>按半音自由升降，或者直接唱出第一个基准音，让 SingRight 用它的实际频率按音程推导后续所有音。还可在 400–480 Hz 之间调整 A4，并单独改变本次练习速度。</p>
           <div><i>±12</i><span>半音移调范围</span><i>±10–100</i><span>cents 自定义容差</span></div>
         </div>
       </section>
