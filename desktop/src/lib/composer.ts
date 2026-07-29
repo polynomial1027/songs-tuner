@@ -1,10 +1,12 @@
-import type { PitchScore, ScoreNote } from "../types";
+import type { ClefChange, KeySignatureChange, PitchScore, RepeatMarker, ScoreNote } from "../types";
 
 export type Clef = "treble" | "bass";
 export type Accidental = -1 | 0 | 1;
 export type PlacementIssue = "invalid-grid" | "crosses-measure" | "overlap";
 
-export const EDIT_GRID_BEATS = 0.125;
+// The editor is intentionally limited to a sixteenth-note grid. Longer values
+// occupy multiple adjacent cells instead of creating a second, finer grid.
+export const EDIT_GRID_BEATS = 0.25;
 
 export const DURATION_OPTIONS = [
   { beats: 4, label: "全音符", glyph: "○", shortcut: "1" },
@@ -59,12 +61,24 @@ export function createEmptyScore(locale: "zh-CN" | "en" = "zh-CN"): PitchScore {
 export function cloneScore(score: PitchScore): PitchScore {
   return JSON.parse(JSON.stringify({
     ...score,
-    notation: score.notation ?? { clef: "treble", keySignature: 0 },
+    notation: {
+      clef: score.notation?.clef ?? "treble",
+      keySignature: score.notation?.keySignature ?? 0,
+      keyChanges: score.notation?.keyChanges ?? [],
+      clefChanges: score.notation?.clefChanges ?? [],
+      repeats: score.notation?.repeats ?? [],
+    },
   })) as PitchScore;
 }
 
 export function scoreEndBeat(score: PitchScore): number {
-  return score.notes.reduce((end, note) => Math.max(end, note.beat + note.durationBeats), 0);
+  const noteEnd = score.notes.reduce((end, note) => Math.max(end, note.beat + note.durationBeats), 0);
+  const eventBeats = [
+    ...(score.notation?.keyChanges ?? []).map((change) => change.beat),
+    ...(score.notation?.clefChanges ?? []).map((change) => change.beat),
+    ...(score.notation?.repeats ?? []).map((marker) => marker.beat),
+  ];
+  return eventBeats.reduce((end, beat) => Math.max(end, beat + EDIT_GRID_BEATS), noteEnd);
 }
 
 export function measureLengthBeats(score: Pick<PitchScore, "timeSignature">): number {
@@ -76,7 +90,115 @@ export function quantizeBeat(beat: number, grid: number): number {
 }
 
 export function nextOpenBeat(score: PitchScore): number {
-  return scoreEndBeat(score);
+  return quantizeBeat(scoreEndBeat(score), EDIT_GRID_BEATS);
+}
+
+export function nextMeasureBeat(score: Pick<PitchScore, "timeSignature">, beat: number): number {
+  const length = measureLengthBeats(score);
+  return (Math.floor((beat + 0.0001) / length) + 1) * length;
+}
+
+export function activeKeySignatureAt(score: PitchScore, beat: number): number {
+  return [...(score.notation?.keyChanges ?? [])]
+    .filter((change) => change.beat <= beat + 0.0001)
+    .sort((a, b) => b.beat - a.beat)[0]?.fifths ?? score.notation?.keySignature ?? 0;
+}
+
+export function activeClefAt(score: PitchScore, beat: number): Clef {
+  return [...(score.notation?.clefChanges ?? [])]
+    .filter((change) => change.beat <= beat + 0.0001)
+    .sort((a, b) => b.beat - a.beat)[0]?.clef ?? score.notation?.clef ?? "treble";
+}
+
+export function upsertKeySignatureChange(score: PitchScore, beat: number, fifths: number): PitchScore {
+  const normalizedBeat = quantizeBeat(beat, EDIT_GRID_BEATS);
+  const change: KeySignatureChange = {
+    beat: normalizedBeat,
+    fifths: Math.max(-7, Math.min(7, Math.round(fifths))),
+  };
+  const keyChanges = [
+    ...(score.notation?.keyChanges ?? []).filter((item) => Math.abs(item.beat - normalizedBeat) > 0.0001),
+    change,
+  ].sort((a, b) => a.beat - b.beat);
+  return {
+    ...score,
+    notation: {
+      clef: score.notation?.clef ?? "treble",
+      keySignature: score.notation?.keySignature ?? 0,
+      keyChanges,
+      clefChanges: score.notation?.clefChanges ?? [],
+      repeats: score.notation?.repeats ?? [],
+    },
+  };
+}
+
+export function upsertClefChange(score: PitchScore, beat: number, clef: Clef): PitchScore {
+  const normalizedBeat = quantizeBeat(beat, EDIT_GRID_BEATS);
+  const change: ClefChange = { beat: normalizedBeat, clef };
+  const clefChanges = [
+    ...(score.notation?.clefChanges ?? []).filter((item) => Math.abs(item.beat - normalizedBeat) > 0.0001),
+    change,
+  ].sort((a, b) => a.beat - b.beat);
+  return {
+    ...score,
+    notation: {
+      clef: score.notation?.clef ?? "treble",
+      keySignature: score.notation?.keySignature ?? 0,
+      keyChanges: score.notation?.keyChanges ?? [],
+      clefChanges,
+      repeats: score.notation?.repeats ?? [],
+    },
+  };
+}
+
+export function toggleRepeatMarker(score: PitchScore, beat: number, type: RepeatMarker["type"]): PitchScore {
+  const measureBeat = Math.floor((beat + 0.0001) / measureLengthBeats(score)) * measureLengthBeats(score);
+  const exists = score.notation?.repeats?.some((item) => item.type === type && Math.abs(item.beat - measureBeat) < 0.0001);
+  const repeats = exists
+    ? (score.notation?.repeats ?? []).filter((item) => item.type !== type || Math.abs(item.beat - measureBeat) > 0.0001)
+    : [...(score.notation?.repeats ?? []), { beat: measureBeat, type }].sort((a, b) => a.beat - b.beat);
+  return {
+    ...score,
+    notation: {
+      clef: score.notation?.clef ?? "treble",
+      keySignature: score.notation?.keySignature ?? 0,
+      keyChanges: score.notation?.keyChanges ?? [],
+      clefChanges: score.notation?.clefChanges ?? [],
+      repeats,
+    },
+  };
+}
+
+export function canTieToNext(score: PitchScore, noteId: string): boolean {
+  const index = score.notes.findIndex((note) => note.id === noteId);
+  const note = score.notes[index];
+  const next = score.notes[index + 1];
+  return Boolean(
+    note
+      && next
+      && note.midi !== null
+      && note.midi === next.midi
+      && Math.abs(note.beat + note.durationBeats - next.beat) < 0.0001,
+  );
+}
+
+export function mergeTiedNotes(score: PitchScore): PitchScore {
+  const notes: ScoreNote[] = [];
+  for (const source of score.notes) {
+    const previous = notes.at(-1);
+    if (
+      previous?.tieToNext
+      && previous.midi !== null
+      && previous.midi === source.midi
+      && Math.abs(previous.beat + previous.durationBeats - source.beat) < 0.0001
+    ) {
+      previous.durationBeats += source.durationBeats;
+      previous.tieToNext = source.tieToNext;
+      continue;
+    }
+    notes.push({ ...source });
+  }
+  return { ...score, notes };
 }
 
 export function notePlacementIssue(

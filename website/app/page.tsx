@@ -21,7 +21,7 @@ export default function Home() {
         <div className="hero-copy">
           <div className="hero-kicker"><i /> 跨平台 · 音频只在本机处理</div>
           <h1>把每一个音，<br /><em>唱到点上。</em></h1>
-          <p>SingRight 用麦克风实时听见你的音高。用键盘在五线谱与简谱的固定槽中打谱、对齐参考音频，再逐个音磨准或录完整首集中纠错。</p>
+          <p>SingRight 用麦克风实时听见你的音高。既能直接自由练声、自动找到最近标准音，也能用键盘打谱，再逐个音磨准或录完整首集中纠错。</p>
           <div className="hero-actions">
             <a className="button primary" href={sitePath("download")}>下载 SingRight <span>↓</span></a>
             <a className="button secondary" href="https://github.com/polynomial1027/songs-tuner" target="_blank" rel="noreferrer">查看源代码 <span>↗</span></a>
@@ -37,7 +37,7 @@ export default function Home() {
             <span>从低到高 · C 大调音阶</span>
             <i>•••</i>
           </div>
-          <div className="product-mode"><b>逐音校准</b><span>连续跟唱</span><span>整曲复盘</span></div>
+          <div className="product-mode"><b>自由练声</b><span>逐音校准</span><span>连续跟唱</span><span>整曲复盘</span></div>
           <div className="mini-score">
             <div className="score-lines"><i /><i /><i /><i /><i /></div>
             <div className="score-blocks">
@@ -73,12 +73,12 @@ export default function Home() {
           <div className="composer-copy">
             <span>WRITE IT. HEAR IT. SING IT. / 从打谱到练唱</span>
             <h2>不用写 JSON，<br />按顺序把旋律打进去。</h2>
-            <p>按 Enter 开始录入，1–5 选择时值，再用 Q 到 ] 的十二个实体键连续输入音高。固定槽与小节容量会自动校验，歌词、时值和简谱音级都在同一个工作台里完成。</p>
+            <p>按 Enter 开始录入，1–5 选择时值，再用 Q 到 ] 的十二个实体键连续输入音高。十六分固定网格会自动对齐并在小节末续写；Space 仍按当前时值输入休止符，所有其他键位都能自行设置。</p>
             <div className="composer-features">
               <article><b>01</b><span><strong>十二音键盘录入</strong><small>1–5 选时值，Q 到 ] 输入音高</small></span></article>
-              <article><b>02</b><span><strong>严格小节容量</strong><small>固定槽、拍号校验与标准休止符</small></span></article>
-              <article><b>03</b><span><strong>边听边打谱</strong><small>参考音频波形、裁剪、速度与时间偏移</small></span></article>
-              <article><b>04</b><span><strong>专业格式互通</strong><small>SingRight、MusicXML 与 MIDI 导出</small></span></article>
+              <article><b>02</b><span><strong>十六分固定网格</strong><small>音符居中、容量校验与自动跨小节</small></span></article>
+              <article><b>03</b><span><strong>完整谱面记号</strong><small>延音线、调号变化、谱号与反复线</small></span></article>
+              <article><b>04</b><span><strong>自动跟随与高分屏</strong><small>长谱拖动、自动回位与 80%–200% 缩放</small></span></article>
             </div>
           </div>
           <div className="composer-product" aria-label="SingRight 五线谱编辑器预览">

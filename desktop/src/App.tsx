@@ -22,6 +22,7 @@ import {
   Sparkles,
   SquarePen,
   Target,
+  Trash2,
   Upload,
   Volume2,
   X,
@@ -30,15 +31,52 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ascendingScale from "./data/ascending-scale.json";
 import emptySong from "./data/empty-song.json";
 import { localize, useI18n } from "./i18n";
-import { createEmptyScore } from "./lib/composer";
+import { createEmptyScore, mergeTiedNotes } from "./lib/composer";
 import { saveBlob } from "./lib/download";
+import { loadEditorPreferences, saveEditorPreferences } from "./lib/editorPreferences";
 import { centsBetweenFrequency, clampCents, frequencyToMidi, midiToFrequency, midiToNoteName, numeralForMidi, referenceHzForAnchor, signed } from "./lib/music";
 import { analyzeAudioFile, detectPitchYin } from "./lib/pitch";
 import { buildSessionResult, noteAtSeconds, parseScoreFile, scoreDurationSeconds, validateScore } from "./lib/score";
 import ScoreEditor from "./ScoreEditor";
 import type { AnalysisFrame, PitchReading, PitchScore, PracticeMode, SessionResult } from "./types";
 
-const BUILT_IN_SCORES = [validateScore(ascendingScale), validateScore(emptySong)];
+const BUILT_IN_SCORES = [validateScore(ascendingScale)];
+const EMPTY_LIBRARY_SCORE: PitchScore = {
+  ...validateScore(emptySong),
+  metadata: {
+    id: "empty-library-placeholder",
+    title: "尚未选择曲谱",
+    artist: "",
+    description: "导入曲谱或打开制谱器开始。",
+  },
+};
+const SCORE_LIBRARY_KEY = "singright-score-library-v1";
+const PRACTICE_METRONOMES_KEY = "singright-practice-metronomes-v1";
+
+function loadScoreLibrary(): PitchScore[] {
+  try {
+    const stored = localStorage.getItem(SCORE_LIBRARY_KEY);
+    if (stored === null) return BUILT_IN_SCORES;
+    const parsed = JSON.parse(stored) as unknown;
+    if (!Array.isArray(parsed)) return BUILT_IN_SCORES;
+    return parsed.map(validateScore);
+  } catch {
+    return BUILT_IN_SCORES;
+  }
+}
+
+function loadPracticeMetronomes(): Record<PracticeMode, boolean> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PRACTICE_METRONOMES_KEY) ?? "{}") as Partial<Record<PracticeMode, boolean>>;
+    return {
+      step: stored.step ?? false,
+      continuous: stored.continuous ?? true,
+      review: stored.review ?? true,
+    };
+  } catch {
+    return { step: false, continuous: true, review: true };
+  }
+}
 type TolerancePreset = "relaxed" | "standard" | "strict" | "custom";
 const TOLERANCE_VALUES: Record<Exclude<TolerancePreset, "custom">, number> = {
   relaxed: 60,
@@ -71,14 +109,19 @@ function scoreDisplayText(score: PitchScore, locale: "zh-CN" | "en"): { title: s
       ? { title: "我的第二首曲目", description: "空白曲目模板：导入曲谱或在编辑器里开始打谱。" }
       : { title: "My Second Song", description: "Blank template: import a score or start composing in the editor." };
   }
+  if (score.metadata.id === "empty-library-placeholder") {
+    return locale === "zh-CN"
+      ? { title: "还没有曲谱", description: "导入曲谱，或在五线谱 / 简谱工作台新建一首。" }
+      : { title: "No score yet", description: "Import a score or create one in the staff / numbered score workspace." };
+  }
   return { title: score.metadata.title, description: score.metadata.description ?? "" };
 }
 
 function App() {
   const { locale, setLocale } = useI18n();
   const tr = (zh: string, en: string) => localize(locale, zh, en);
-  const [scores, setScores] = useState<PitchScore[]>(BUILT_IN_SCORES);
-  const [selectedId, setSelectedId] = useState(BUILT_IN_SCORES[0].metadata.id);
+  const [scores, setScores] = useState<PitchScore[]>(loadScoreLibrary);
+  const [selectedId, setSelectedId] = useState(() => loadScoreLibrary()[0]?.metadata.id ?? EMPTY_LIBRARY_SCORE.metadata.id);
   const [mode, setMode] = useState<PracticeMode>("step");
   const [transpose, setTranspose] = useState(0);
   const [referenceHz, setReferenceHz] = useState(440);
@@ -87,6 +130,7 @@ function App() {
   const [toleranceCents, setToleranceCents] = useState(35);
   const [tolerancePreset, setTolerancePreset] = useState<TolerancePreset>("standard");
   const [holdGoalMs, setHoldGoalMs] = useState(650);
+  const [practiceMetronomes, setPracticeMetronomes] = useState<Record<PracticeMode, boolean>>(loadPracticeMetronomes);
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>("idle");
   const [captureError, setCaptureError] = useState("");
   const [reading, setReading] = useState<PitchReading | null>(null);
@@ -101,6 +145,10 @@ function App() {
   const [toast, setToast] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [editorSeed, setEditorSeed] = useState<PitchScore | null>(null);
+  const [uiScale, setUiScale] = useState(() => loadEditorPreferences().uiScale);
+  const [freePracticeActive, setFreePracticeActive] = useState(false);
+  const [freeTargetMidi, setFreeTargetMidi] = useState<number | null>(null);
+  const [isAuditioning, setIsAuditioning] = useState(false);
 
   const scoreInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -109,6 +157,11 @@ function App() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const detectorFrameRef = useRef<number | null>(null);
   const practiceFrameRef = useRef<number | null>(null);
+  const metronomeTimerRef = useRef<number | null>(null);
+  const metronomeBeatRef = useRef(0);
+  const auditionContextRef = useRef<AudioContext | null>(null);
+  const auditionNodesRef = useRef<AudioScheduledSourceNode[]>([]);
+  const auditionTimerRef = useRef<number | null>(null);
   const sessionStartRef = useRef(0);
   const sessionFramesRef = useRef<AnalysisFrame[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -120,14 +173,14 @@ function App() {
   const referenceHzRef = useRef(referenceHz);
 
   const selectedScore = useMemo(
-    () => scores.find((candidate) => candidate.metadata.id === selectedId) ?? scores[0],
+    () => scores.find((candidate) => candidate.metadata.id === selectedId) ?? scores[0] ?? EMPTY_LIBRARY_SCORE,
     [scores, selectedId],
   );
   const effectiveReferenceHz = tonicCalibration
     ? referenceHzForAnchor(tonicCalibration.frequency, tonicCalibration.targetMidi)
     : referenceHz;
   const practiceScore = useMemo(
-    () => ({ ...selectedScore, tempo: { bpm: practiceBpm } }),
+    () => mergeTiedNotes({ ...selectedScore, tempo: { bpm: practiceBpm } }),
     [practiceBpm, selectedScore],
   );
   const selectedDisplay = scoreDisplayText(selectedScore, locale);
@@ -150,9 +203,9 @@ function App() {
   };
   const totalDuration = scoreDurationSeconds(practiceScore);
   const activeIndex = mode === "step"
-    ? Math.min(stepIndex, Math.max(0, selectedScore.notes.length - 1))
+    ? Math.min(stepIndex, Math.max(0, practiceScore.notes.length - 1))
     : noteAtSeconds(practiceScore, playhead)?.index ?? -1;
-  const activeNote = activeIndex >= 0 ? selectedScore.notes[activeIndex] : null;
+  const activeNote = activeIndex >= 0 ? practiceScore.notes[activeIndex] : null;
   const targetMidi = activeNote?.midi === null || activeNote?.midi === undefined
     ? null
     : activeNote.midi + transpose;
@@ -160,14 +213,26 @@ function App() {
   const liveCents = reading && targetMidi !== null
     ? centsBetweenFrequency(reading.frequency, targetMidi, effectiveReferenceHz)
     : null;
+  const freeNearestMidi = reading ? Math.max(0, Math.min(127, Math.round(frequencyToMidi(reading.frequency, effectiveReferenceHz)))) : null;
+  const freeResolvedMidi = freeTargetMidi ?? freeNearestMidi;
+  const freeCents = reading && freeResolvedMidi !== null
+    ? centsBetweenFrequency(reading.frequency, freeResolvedMidi, effectiveReferenceHz)
+    : null;
+  const freeGaugePosition = freeCents === null ? 50 : (clampCents(freeCents) + 100) / 2 * 100;
   const isInTune = liveCents !== null && Math.abs(liveCents) <= toleranceCents;
   const progress = mode === "step"
-    ? (selectedScore.notes.length ? (stepIndex + Math.min(1, stableMs / holdGoalMs)) / selectedScore.notes.length : 0)
+    ? (practiceScore.notes.length ? (stepIndex + Math.min(1, stableMs / holdGoalMs)) / practiceScore.notes.length : 0)
     : (totalDuration ? playhead / totalDuration : 0);
 
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+  useEffect(() => {
+    localStorage.setItem(SCORE_LIBRARY_KEY, JSON.stringify(scores));
+  }, [scores]);
+  useEffect(() => {
+    localStorage.setItem(PRACTICE_METRONOMES_KEY, JSON.stringify(practiceMetronomes));
+  }, [practiceMetronomes]);
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
@@ -194,7 +259,7 @@ function App() {
     if (nextStable >= holdGoalMs) {
       stableMsRef.current = 0;
       setStableMs(0);
-      const nextIndex = findPitchedIndex(selectedScore, stepIndex + 1, 1);
+      const nextIndex = findPitchedIndex(practiceScore, stepIndex + 1, 1);
       if (nextIndex < 0) {
         setActive(false);
         setToast(tr("逐音练习完成，很稳！", "Note-by-note practice complete. Nicely controlled."));
@@ -202,16 +267,38 @@ function App() {
         setStepIndex(nextIndex);
       }
     }
-  }, [active, effectiveReferenceHz, holdGoalMs, locale, reading, selectedScore.notes.length, stepIndex, targetMidi, toleranceCents]);
+  }, [active, effectiveReferenceHz, holdGoalMs, locale, practiceScore, reading, stepIndex, targetMidi, toleranceCents]);
+
+  useEffect(() => {
+    if (!active || !practiceMetronomes[mode]) {
+      if (metronomeTimerRef.current !== null) window.clearInterval(metronomeTimerRef.current);
+      metronomeTimerRef.current = null;
+      return;
+    }
+    startPracticeMetronome();
+    return () => {
+      if (metronomeTimerRef.current !== null) window.clearInterval(metronomeTimerRef.current);
+      metronomeTimerRef.current = null;
+    };
+  }, [active, mode, practiceBpm, practiceMetronomes]);
 
   useEffect(() => {
     return () => {
       if (detectorFrameRef.current) cancelAnimationFrame(detectorFrameRef.current);
       if (practiceFrameRef.current) cancelAnimationFrame(practiceFrameRef.current);
+      if (metronomeTimerRef.current !== null) window.clearInterval(metronomeTimerRef.current);
+      if (auditionTimerRef.current !== null) window.clearTimeout(auditionTimerRef.current);
+      auditionNodesRef.current.forEach((node) => {
+        try { node.stop(); } catch { /* already stopped */ }
+      });
       streamRef.current?.getTracks().forEach((track) => track.stop());
       void audioContextRef.current?.close();
-      if (recordingUrl) URL.revokeObjectURL(recordingUrl);
+      void auditionContextRef.current?.close();
     };
+  }, []);
+
+  useEffect(() => () => {
+    if (recordingUrl) URL.revokeObjectURL(recordingUrl);
   }, [recordingUrl]);
 
   async function ensureMicrophone(): Promise<MediaStream> {
@@ -286,6 +373,7 @@ function App() {
 
   async function stopMicrophone() {
     if (active) stopPractice(false);
+    setFreePracticeActive(false);
     if (detectorFrameRef.current) cancelAnimationFrame(detectorFrameRef.current);
     detectorFrameRef.current = null;
     analyserRef.current?.disconnect();
@@ -317,16 +405,108 @@ function App() {
     recorderRef.current = recorder;
   }
 
+  function playMetronomeClick(beat: number) {
+    const context = audioContextRef.current;
+    if (!context || context.state === "closed") return;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const measureBeats = Math.max(1, Math.round(practiceScore.timeSignature.beats * (4 / practiceScore.timeSignature.beatUnit)));
+    oscillator.frequency.value = beat % measureBeats === 0 ? 1320 : 920;
+    gain.gain.setValueAtTime(0.09, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.045);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.05);
+  }
+
+  function startPracticeMetronome() {
+    if (metronomeTimerRef.current !== null) window.clearInterval(metronomeTimerRef.current);
+    metronomeBeatRef.current = 0;
+    playMetronomeClick(0);
+    metronomeTimerRef.current = window.setInterval(() => {
+      metronomeBeatRef.current += 1;
+      playMetronomeClick(metronomeBeatRef.current);
+    }, 60_000 / practiceBpm);
+  }
+
+  function stopAudition() {
+    auditionNodesRef.current.forEach((node) => {
+      try { node.stop(); } catch { /* already stopped */ }
+    });
+    auditionNodesRef.current = [];
+    if (auditionTimerRef.current !== null) window.clearTimeout(auditionTimerRef.current);
+    auditionTimerRef.current = null;
+    setIsAuditioning(false);
+  }
+
+  async function auditionNotes(notes: Array<{ midi: number; start: number; duration: number }>, totalSeconds: number) {
+    stopAudition();
+    const context = auditionContextRef.current ?? new AudioContext();
+    auditionContextRef.current = context;
+    await context.resume();
+    const master = context.createGain();
+    master.gain.value = 0.18;
+    master.connect(context.destination);
+    const now = context.currentTime + 0.04;
+    notes.forEach((note) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const startAt = now + note.start;
+      const endAt = startAt + note.duration;
+      oscillator.type = "triangle";
+      oscillator.frequency.value = midiToFrequency(note.midi, effectiveReferenceHz);
+      gain.gain.setValueAtTime(0, startAt);
+      gain.gain.linearRampToValueAtTime(0.72, startAt + 0.012);
+      gain.gain.setValueAtTime(0.68, Math.max(startAt + 0.013, endAt - 0.035));
+      gain.gain.linearRampToValueAtTime(0, endAt);
+      oscillator.connect(gain).connect(master);
+      oscillator.start(startAt);
+      oscillator.stop(endAt + 0.02);
+      auditionNodesRef.current.push(oscillator);
+    });
+    setIsAuditioning(true);
+    auditionTimerRef.current = window.setTimeout(() => {
+      auditionNodesRef.current = [];
+      auditionTimerRef.current = null;
+      setIsAuditioning(false);
+    }, Math.max(100, totalSeconds * 1000 + 100));
+  }
+
+  async function auditionCurrentTarget() {
+    const midi = freePracticeActive && freeResolvedMidi !== null ? freeResolvedMidi : targetMidi;
+    if (midi === null) {
+      setToast(tr("当前位置是休止符或还没有目标音", "The current position is a rest or has no target note."));
+      return;
+    }
+    await auditionNotes([{ midi, start: 0, duration: 1.15 }], 1.15);
+  }
+
+  async function auditionWholeScore() {
+    if (!practiceScore.notes.some((note) => note.midi !== null)) {
+      setToast(tr("当前曲谱没有可以试听的音符", "The current score has no pitched notes to audition."));
+      return;
+    }
+    const secondsPerBeat = 60 / practiceBpm;
+    const notes = practiceScore.notes.flatMap((note) => note.midi === null ? [] : [{
+      midi: note.midi + transpose,
+      start: note.beat * secondsPerBeat,
+      duration: Math.max(0.08, note.durationBeats * secondsPerBeat),
+    }]);
+    await auditionNotes(notes, totalDuration);
+  }
+
   async function startPractice() {
-    if (selectedScore.notes.length === 0) {
+    if (practiceScore.notes.length === 0) {
       setToast(tr("这是空白曲目，请先导入曲谱", "This score is blank. Import or create a score first."));
       scoreInputRef.current?.click();
       return;
     }
+    stopAudition();
     const stream = await ensureMicrophone();
+    setFreePracticeActive(false);
     setSessionResult(null);
     setPlayhead(0);
-    setStepIndex(Math.max(0, findPitchedIndex(selectedScore, 0, 1)));
+    setStepIndex(Math.max(0, findPitchedIndex(practiceScore, 0, 1)));
     setStableMs(0);
     stableMsRef.current = 0;
     lastReadingAtRef.current = 0;
@@ -356,6 +536,8 @@ function App() {
     setActive(false);
     if (practiceFrameRef.current) cancelAnimationFrame(practiceFrameRef.current);
     practiceFrameRef.current = null;
+    if (metronomeTimerRef.current !== null) window.clearInterval(metronomeTimerRef.current);
+    metronomeTimerRef.current = null;
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     if (modeRef.current !== "step" && sessionFramesRef.current.length) {
       const result = buildSessionResult(
@@ -383,6 +565,23 @@ function App() {
     setStableMs(0);
   }
 
+  async function toggleFreePractice() {
+    if (freePracticeActive) {
+      setFreePracticeActive(false);
+      setToast(tr("自由练声已暂停；麦克风仍保持连接", "Free vocal practice paused; the microphone remains connected."));
+      return;
+    }
+    if (active) stopPractice(false);
+    stopAudition();
+    try {
+      await ensureMicrophone();
+      setFreePracticeActive(true);
+      setToast(tr("自由练声已开启，麦克风会持续识别音高", "Free vocal practice is active and continuously tracking pitch."));
+    } catch {
+      // ensureMicrophone already presents the device-specific error.
+    }
+  }
+
   async function handleScoreImport(file: File | undefined) {
     if (!file) return;
     try {
@@ -402,6 +601,30 @@ function App() {
     } finally {
       if (scoreInputRef.current) scoreInputRef.current.value = "";
     }
+  }
+
+  function deleteUserScore(score: PitchScore) {
+    const confirmed = window.confirm(tr(
+      `确定从练习曲目中删除《${score.metadata.title}》吗？此操作不会删除你导出的本地曲谱文件。`,
+      `Remove “${score.metadata.title}” from the practice list? This will not delete any score file you exported.`,
+    ));
+    if (!confirmed) return;
+    const remaining = scores.filter((candidate) => candidate.metadata.id !== score.metadata.id);
+    setScores(remaining);
+    if (selectedId === score.metadata.id) {
+      if (active) stopPractice(false);
+      stopAudition();
+      setFreePracticeActive(false);
+      const fallback = remaining[0] ?? EMPTY_LIBRARY_SCORE;
+      setSelectedId(fallback.metadata.id);
+      setPracticeBpm(fallback.tempo.bpm);
+      setTranspose(0);
+      setTonicCalibration(null);
+      setStepIndex(0);
+      setPlayhead(0);
+      setSessionResult(null);
+    }
+    setToast(tr(`已从列表删除《${score.metadata.title}》`, `Removed “${score.metadata.title}” from the list.`));
   }
 
   async function handleAudioImport(file: File | undefined) {
@@ -505,6 +728,12 @@ function App() {
     return (
       <ScoreEditor
         initialScore={editorSeed}
+        uiScale={uiScale}
+        onUiScaleChange={(scale) => {
+          const next = Math.max(80, Math.min(200, scale));
+          setUiScale(next);
+          saveEditorPreferences({ ...loadEditorPreferences(), uiScale: next });
+        }}
         onClose={() => setEditorSeed(null)}
         onCommit={(score, close) => {
           setScores((current) => [...current.filter((candidate) => candidate.metadata.id !== score.metadata.id), score]);
@@ -522,7 +751,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={{ zoom: uiScale / 100 }}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark"><AudioLines size={22} /></div>
@@ -535,29 +764,33 @@ function App() {
             {scores.map((score, index) => {
               const selected = score.metadata.id === selectedId;
               return (
-                <button
-                  className={`song-item ${selected ? "selected" : ""}`}
-                  key={score.metadata.id}
-                  onClick={() => {
-                    if (active) stopPractice(false);
-                    setSelectedId(score.metadata.id);
-                    setTranspose(0);
-                    setTonicCalibration(null);
-                    setPracticeBpm(score.tempo.bpm);
-                    setStepIndex(0);
-                    setPlayhead(0);
-                    setSessionResult(null);
-                  }}
-                >
-                  <span className="song-number">{String(index + 1).padStart(2, "0")}</span>
-                  <span className="song-copy">
-                    <strong>{scoreDisplayText(score, locale).title}</strong>
-                    <small>{score.notes.length
-                      ? tr(`${score.notes.length} 个音 · ${score.tempo.bpm} BPM`, `${score.notes.length} notes · ${score.tempo.bpm} BPM`)
-                      : tr("等待导入曲谱", "Waiting for a score")}</small>
-                  </span>
-                  {selected && <Volume2 size={16} />}
-                </button>
+                <div className={`song-row ${selected ? "selected" : ""}`} key={score.metadata.id}>
+                  <button
+                    className={`song-item ${selected ? "selected" : ""}`}
+                    onClick={() => {
+                      if (active) stopPractice(false);
+                      stopAudition();
+                      setFreePracticeActive(false);
+                      setSelectedId(score.metadata.id);
+                      setTranspose(0);
+                      setTonicCalibration(null);
+                      setPracticeBpm(score.tempo.bpm);
+                      setStepIndex(0);
+                      setPlayhead(0);
+                      setSessionResult(null);
+                    }}
+                  >
+                    <span className="song-number">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="song-copy">
+                      <strong>{scoreDisplayText(score, locale).title}</strong>
+                      <small>{score.notes.length
+                        ? tr(`${score.notes.length} 个音 · ${score.tempo.bpm} BPM`, `${score.notes.length} notes · ${score.tempo.bpm} BPM`)
+                        : tr("等待导入曲谱", "Waiting for a score")}</small>
+                    </span>
+                    {selected && <Volume2 size={16} />}
+                  </button>
+                  <button className="song-delete" onClick={() => deleteUserScore(score)} title={tr("从列表删除", "Remove from list")} aria-label={tr(`删除《${score.metadata.title}》`, `Remove “${score.metadata.title}”`)}><Trash2 /></button>
+                </div>
               );
             })}
           </div>
@@ -630,19 +863,53 @@ function App() {
           {mode !== "step" && <i>{mode === "continuous" ? tr("实时显示偏差", "Live cents shown") : tr("演唱时隐藏偏差", "Cents hidden during take")}</i>}
         </div>
 
+        <section className={`free-vocal-card ${freePracticeActive ? "active" : ""}`}>
+          <div className="free-vocal-heading">
+            <span className="free-vocal-icon"><AudioLines /></span>
+            <div>
+              <span className="card-kicker">FREE VOICE / 自由练声</span>
+              <strong>{tr("不需要曲谱，唱出任何音", "Sing any note without a score")}</strong>
+              <small>{tr("开启后麦克风持续监听；自动寻找最近的标准音，或固定一个目标音反复练习。", "While active, the microphone listens continuously and finds the nearest standard pitch, or you can lock one target note.")}</small>
+            </div>
+          </div>
+          <label className="free-target-select">
+            <span>{tr("识别方式", "Target mode")}</span>
+            <select value={freeTargetMidi ?? "auto"} onChange={(event) => setFreeTargetMidi(event.target.value === "auto" ? null : Number(event.target.value))}>
+              <option value="auto">{tr("自动就近音", "Nearest note automatically")}</option>
+              {Array.from({ length: 49 }, (_, index) => 36 + index).map((midi) => <option key={midi} value={midi}>{midiToNoteName(midi)} · {midiToFrequency(midi, effectiveReferenceHz).toFixed(1)} Hz</option>)}
+            </select>
+          </label>
+          <div className="free-vocal-reading">
+            <div><span>{freeTargetMidi === null ? tr("最近标准音", "Nearest note") : tr("固定目标音", "Locked target")}</span><strong>{freeResolvedMidi === null ? "—" : midiToNoteName(freeResolvedMidi)}</strong><small>{freeResolvedMidi === null ? tr("等待声音", "Waiting for voice") : `${midiToFrequency(freeResolvedMidi, effectiveReferenceHz).toFixed(1)} Hz`}</small></div>
+            <div className="free-vocal-gauge">
+              <span>{freeCents === null ? tr("唱出一个稳定的音", "Sing a steady note") : `${signed(freeCents)} cents`}</span>
+              <div className="gauge-track">
+                <div className="gauge-zone" />
+                <div className={`gauge-needle ${freeCents !== null && Math.abs(freeCents) <= toleranceCents ? "in-tune" : ""}`} style={{ left: `${freeGaugePosition}%` }} />
+              </div>
+              <small><i>{tr("偏低", "Flat")}</i><i>0</i><i>{tr("偏高", "Sharp")}</i></small>
+            </div>
+            <div><span>{tr("麦克风识别", "Detected voice")}</span><strong>{reading ? midiToNoteName(Math.round(reading.midi)) : "—"}</strong><small>{reading ? `${reading.frequency.toFixed(1)} Hz` : tr("尚未检测到声音", "No voice detected")}</small></div>
+          </div>
+          <button className={freePracticeActive ? "active" : ""} onClick={() => void toggleFreePractice()}>
+            {freePracticeActive ? <><Pause /> {tr("暂停自由练声", "Pause free practice")}</> : <><Mic /> {tr("开启持续监听", "Start continuous listening")}</>}
+          </button>
+          <span className="free-listening-state"><i />{freePracticeActive ? tr("正在持续识别；切换目标音不会中断麦克风", "Continuously tracking; changing the target will not interrupt the microphone") : tr("当前未开启", "Currently inactive")}</span>
+        </section>
+
         <section className="practice-card">
           <div className="score-head">
             <div>
               <span className="card-kicker">{tr("CURRENT PHRASE / 当前片段", "CURRENT PHRASE")}</span>
               <strong>{mode === "step"
-                ? tr(`第 ${Math.min(stepIndex + 1, selectedScore.notes.length || 1)} / ${selectedScore.notes.length || 0} 音`, `Note ${Math.min(stepIndex + 1, selectedScore.notes.length || 1)} of ${selectedScore.notes.length || 0}`)
+                ? tr(`第 ${Math.min(stepIndex + 1, practiceScore.notes.length || 1)} / ${practiceScore.notes.length || 0} 音`, `Note ${Math.min(stepIndex + 1, practiceScore.notes.length || 1)} of ${practiceScore.notes.length || 0}`)
                 : tr(`${Math.round(playhead)} / ${Math.round(totalDuration)} 秒`, `${Math.round(playhead)} / ${Math.round(totalDuration)} sec`)}</strong>
             </div>
             <div className="meter-legend"><span><i className="perfect" /> {tr("准确", "Accurate")}</span><span><i className="close" /> {tr("接近", "Close")}</span><span><i className="off" /> {tr("偏离", "Off")}</span></div>
           </div>
 
           <ScoreRail
-            score={selectedScore}
+            score={practiceScore}
             activeIndex={activeIndex}
             transpose={transpose}
             progress={progress}
@@ -691,11 +958,20 @@ function App() {
           )}
 
           <div className="transport">
+            <button className="audition-button" onClick={() => void auditionCurrentTarget()}><Volume2 /> {tr("试听当前音", "Hear target")}</button>
+            <button className={`audition-button ${isAuditioning ? "active" : ""}`} onClick={() => isAuditioning ? stopAudition() : void auditionWholeScore()}>
+              {isAuditioning ? <Pause /> : <AudioLines />} {isAuditioning ? tr("停止试听", "Stop preview") : tr("试听整曲", "Preview score")}
+            </button>
+            <button
+              className={`practice-metronome-toggle ${practiceMetronomes[mode] ? "active" : ""}`}
+              onClick={() => setPracticeMetronomes((current) => ({ ...current, [mode]: !current[mode] }))}
+              title={tr(`${modeCopy[mode].label}节拍器`, `${modeCopy[mode].label} metronome`)}
+            ><AudioLines /> {practiceMetronomes[mode] ? tr("节拍器开", "Metronome on") : tr("节拍器关", "Metronome off")}</button>
             <button
               className="skip-button"
-              disabled={mode !== "step" || findPitchedIndex(selectedScore, stepIndex - 1, -1) < 0}
+              disabled={mode !== "step" || findPitchedIndex(practiceScore, stepIndex - 1, -1) < 0}
               onClick={() => {
-                const previous = findPitchedIndex(selectedScore, stepIndex - 1, -1);
+                const previous = findPitchedIndex(practiceScore, stepIndex - 1, -1);
                 if (previous >= 0) setStepIndex(previous);
               }}
             ><ChevronLeft /></button>
@@ -706,9 +982,9 @@ function App() {
             </button>
             <button
               className="skip-button"
-              disabled={mode !== "step" || findPitchedIndex(selectedScore, stepIndex + 1, 1) < 0}
+              disabled={mode !== "step" || findPitchedIndex(practiceScore, stepIndex + 1, 1) < 0}
               onClick={() => {
-                const next = findPitchedIndex(selectedScore, stepIndex + 1, 1);
+                const next = findPitchedIndex(practiceScore, stepIndex + 1, 1);
                 if (next >= 0) setStepIndex(next);
               }}
             ><ChevronRight /></button>
@@ -779,6 +1055,28 @@ function App() {
               <small>{tr("首次启动会采用安装包语言或系统语言，你可以随时在这里切换。", "The first launch uses the installer or system language. You can change it here anytime.")}</small>
             </label>
             <label>
+              <div><span>{tr("界面缩放 / 高分辨率适配", "Interface scale / HiDPI")}</span><strong>{uiScale}%</strong></div>
+              <input
+                type="range"
+                min="80"
+                max="200"
+                step="10"
+                value={uiScale}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setUiScale(next);
+                  saveEditorPreferences({ ...loadEditorPreferences(), uiScale: next });
+                }}
+              />
+              <div className="display-scale-presets">
+                {[100, 125, 150, 175, 200].map((value) => <button className={uiScale === value ? "active" : ""} key={value} onClick={() => {
+                  setUiScale(value);
+                  saveEditorPreferences({ ...loadEditorPreferences(), uiScale: value });
+                }}>{value}%</button>)}
+              </div>
+              <small>{tr("高分辨率屏幕建议选择 125%–200%。文字、按钮、侧栏、音准仪和曲谱会同步放大，设置会保存在本机。", "Use 125%–200% on high-resolution displays. Text, controls, panels, pitch meters, and notation scale together and the setting is saved locally.")}</small>
+            </label>
+            <label>
               <div><span>{tr("本次练习速度", "Practice tempo")}</span><strong>{practiceBpm} BPM</strong></div>
               <input type="range" min="20" max="300" step="1" value={practiceBpm} onChange={(event) => setPracticeBpm(Number(event.target.value))} />
               <small>{tr(`曲谱默认 ${selectedScore.tempo.bpm} BPM。这里只改变练习、跟唱和复盘速度，不会修改五线谱里的原始速度。`, `Score default: ${selectedScore.tempo.bpm} BPM. This changes practice, follow, and review timing without editing the score tempo.`)}</small>
@@ -841,6 +1139,19 @@ function App() {
               <input type="range" min="350" max="1200" step="50" value={holdGoalMs} onChange={(event) => setHoldGoalMs(Number(event.target.value))} />
               <small>{tr("在容差范围内持续达到此时长，才算通过当前音。", "A note passes only after staying within tolerance for this duration.")}</small>
             </label>
+            <label>
+              <div><span>{tr("各练习模式节拍器", "Metronome by practice mode")}</span><strong>{tr("独立开关", "Independent")}</strong></div>
+              <div className="practice-metronome-settings">
+                {(Object.keys(modeCopy) as PracticeMode[]).map((item) => (
+                  <button
+                    className={practiceMetronomes[item] ? "active" : ""}
+                    key={item}
+                    onClick={() => setPracticeMetronomes((current) => ({ ...current, [item]: !current[item] }))}
+                  ><AudioLines /> <span>{modeCopy[item].label}</span><small>{practiceMetronomes[item] ? tr("开启", "On") : tr("关闭", "Off")}</small></button>
+                ))}
+              </div>
+              <small>{tr("逐音校准、连续跟唱和整曲复盘分别记忆开关；制谱试听也保留自己的节拍器开关。", "Note-by-note, live follow, and full-take review remember separate choices; composer playback keeps its own metronome switch.")}</small>
+            </label>
             <div className="settings-summary">
               <Gauge size={20} />
               <span>{tr("速度、移调、首音、参考频率、容差与稳定时长都集中在这里；它们同时作用于实时练习和录音分析。", "Tempo, transpose, first-note lock, reference, tolerance, and hold time are all managed here and apply to live practice and recording analysis.")}</span>
@@ -867,6 +1178,35 @@ function ScoreRail({
 }) {
   const { locale } = useI18n();
   const tr = (zh: string, en: string) => localize(locale, zh, en);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ x: number; left: number } | null>(null);
+  const returnTimerRef = useRef<number | null>(null);
+  const manualUntilRef = useRef(0);
+  const [dragging, setDragging] = useState(false);
+  const totalBeats = score.notes.length ? Math.max(...score.notes.map((note) => note.beat + note.durationBeats)) : 1;
+  const pitched = score.notes.filter((note) => note.midi !== null).map((note) => note.midi as number);
+  const minMidi = pitched.length ? Math.min(...pitched) : 60;
+  const maxMidi = pitched.length ? Math.max(...pitched) : 72;
+  const pitchSpan = Math.max(7, maxMidi - minMidi);
+  const railWidth = Math.max(900, Math.ceil(totalBeats * 92) + 80);
+  const beatWidth = (railWidth - 80) / Math.max(1, totalBeats);
+  const targetX = activeIndex >= 0 && score.notes[activeIndex]
+    ? 40 + score.notes[activeIndex].beat * beatWidth
+    : 40 + Math.max(0, Math.min(1, progress)) * (railWidth - 80);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || dragging || Date.now() < manualUntilRef.current) return;
+    viewport.scrollTo({
+      left: Math.max(0, targetX - viewport.clientWidth * 0.42),
+      behavior: activeIndex >= 0 ? "smooth" : "auto",
+    });
+  }, [activeIndex, dragging, targetX]);
+
+  useEffect(() => () => {
+    if (returnTimerRef.current !== null) window.clearTimeout(returnTimerRef.current);
+  }, []);
+
   if (score.notes.length === 0) {
     return (
       <div className="empty-score">
@@ -875,32 +1215,53 @@ function ScoreRail({
       </div>
     );
   }
-  const totalBeats = Math.max(...score.notes.map((note) => note.beat + note.durationBeats));
-  const pitched = score.notes.filter((note) => note.midi !== null).map((note) => note.midi as number);
-  const minMidi = Math.min(...pitched);
-  const maxMidi = Math.max(...pitched);
-  const pitchSpan = Math.max(7, maxMidi - minMidi);
 
   return (
-    <div className="score-viewport">
-      <div className="staff-lines">{Array.from({ length: 5 }, (_, index) => <i key={index} />)}</div>
-      <div className="note-rail">
+    <div
+      className={`score-viewport draggable-score ${dragging ? "dragging" : ""}`}
+      ref={viewportRef}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        dragRef.current = { x: event.clientX, left: event.currentTarget.scrollLeft };
+        setDragging(true);
+        if (returnTimerRef.current !== null) window.clearTimeout(returnTimerRef.current);
+      }}
+      onPointerMove={(event) => {
+        if (!dragRef.current) return;
+        event.currentTarget.scrollLeft = dragRef.current.left - (event.clientX - dragRef.current.x);
+      }}
+      onPointerUp={(event) => {
+        dragRef.current = null;
+        manualUntilRef.current = Date.now() + 1200;
+        setDragging(false);
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        returnTimerRef.current = window.setTimeout(() => {
+          manualUntilRef.current = 0;
+          const viewport = viewportRef.current;
+          viewport?.scrollTo({ left: Math.max(0, targetX - viewport.clientWidth * 0.42), behavior: "smooth" });
+        }, 1200);
+      }}
+    >
+      <div className="note-rail" style={{ width: `${railWidth}px` }}>
+        <div className="staff-lines">{Array.from({ length: 5 }, (_, index) => <i key={index} />)}</div>
         {score.notes.map((note, index) => {
-          const left = (note.beat / totalBeats) * 100;
-          const width = Math.max(5.5, (note.durationBeats / totalBeats) * 100 - 0.8);
+          const left = 40 + note.beat * beatWidth;
+          const width = Math.max(44, note.durationBeats * beatWidth - 8);
           const bottom = note.midi === null ? 10 : 17 + (((note.midi as number) - minMidi) / pitchSpan) * 43;
           return (
             <div
               className={`score-note ${index < activeIndex ? "passed" : ""} ${index === activeIndex ? "current" : ""} ${note.midi === null ? "rest" : ""}`}
               key={note.id}
-              style={{ left: `${left}%`, width: `${width}%`, bottom: `${bottom}%` }}
+              style={{ left: `${left}px`, width: `${width}px`, bottom: `${bottom}%` }}
             >
               <span>{note.midi === null ? "0" : note.numeral || numeralForMidi(note.midi + transpose, score.tuning.tonicMidi + transpose)}</span>
               <small>{note.lyric || (note.midi === null ? "" : midiToNoteName(note.midi + transpose))}</small>
             </div>
           );
         })}
-        <div className="playhead" style={{ left: `${Math.max(0, Math.min(100, progress * 100))}%` }}><i /></div>
+        <div className="playhead" style={{ left: `${40 + Math.max(0, Math.min(1, progress)) * (railWidth - 80)}px` }}><i /></div>
+        <span className="score-drag-hint">{tr("自动跟随 · 按住拖动查看 · 松开后回到当前位置", "Auto-follow · drag to inspect · returns to the current position")}</span>
       </div>
     </div>
   );

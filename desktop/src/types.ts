@@ -8,6 +8,23 @@ export interface ScoreNote {
   numeral?: string;
   lyric?: string;
   spelling?: string;
+  explicitAccidental?: "flat" | "natural" | "sharp";
+  tieToNext?: boolean;
+}
+
+export interface KeySignatureChange {
+  beat: number;
+  fifths: number;
+}
+
+export interface ClefChange {
+  beat: number;
+  clef: "treble" | "bass";
+}
+
+export interface RepeatMarker {
+  beat: number;
+  type: "start" | "end";
 }
 
 export interface PitchScore {
@@ -26,6 +43,9 @@ export interface PitchScore {
   notation?: {
     clef: "treble" | "bass";
     keySignature: number;
+    keyChanges?: KeySignatureChange[];
+    clefChanges?: ClefChange[];
+    repeats?: RepeatMarker[];
   };
   audioGuide?: {
     name: string;

@@ -26,6 +26,24 @@ export function validateScore(value: unknown): PitchScore {
       || typeof value.notation.keySignature !== "number" || value.notation.keySignature < -7 || value.notation.keySignature > 7) {
       throw new Error("notation 的谱号或调号无效");
     }
+    const keyChanges = value.notation.keyChanges ?? [];
+    const clefChanges = value.notation.clefChanges ?? [];
+    const repeats = value.notation.repeats ?? [];
+    if (!Array.isArray(keyChanges) || keyChanges.some((change) => !isRecord(change)
+      || typeof change.beat !== "number" || change.beat < 0
+      || typeof change.fifths !== "number" || change.fifths < -7 || change.fifths > 7)) {
+      throw new Error("notation.keyChanges 无效");
+    }
+    if (!Array.isArray(clefChanges) || clefChanges.some((change) => !isRecord(change)
+      || typeof change.beat !== "number" || change.beat < 0
+      || (change.clef !== "treble" && change.clef !== "bass"))) {
+      throw new Error("notation.clefChanges 无效");
+    }
+    if (!Array.isArray(repeats) || repeats.some((marker) => !isRecord(marker)
+      || typeof marker.beat !== "number" || marker.beat < 0
+      || (marker.type !== "start" && marker.type !== "end"))) {
+      throw new Error("notation.repeats 无效");
+    }
   }
   if (value.audioGuide !== undefined) {
     if (!isRecord(value.audioGuide) || typeof value.audioGuide.name !== "string"
@@ -53,6 +71,13 @@ export function validateScore(value: unknown): PitchScore {
     }
     if (typeof rawNote.beat !== "number" || typeof rawNote.durationBeats !== "number" || rawNote.durationBeats <= 0) {
       throw new Error(`音符 ${rawNote.id} 的拍点或时值无效`);
+    }
+    if (rawNote.tieToNext !== undefined && typeof rawNote.tieToNext !== "boolean") {
+      throw new Error(`音符 ${rawNote.id} 的延音线设置无效`);
+    }
+    if (rawNote.explicitAccidental !== undefined
+      && !["flat", "natural", "sharp"].includes(String(rawNote.explicitAccidental))) {
+      throw new Error(`音符 ${rawNote.id} 的临时升降记号无效`);
     }
     if (rawNote.beat < previousEnd - 0.0001) throw new Error(`音符 ${rawNote.id} 与前一音符重叠或未排序`);
     previousEnd = rawNote.beat + rawNote.durationBeats;

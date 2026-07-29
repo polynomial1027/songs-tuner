@@ -50,7 +50,43 @@
       "required": ["clef", "keySignature"],
       "properties": {
         "clef": { "enum": ["treble", "bass"] },
-        "keySignature": { "type": "integer", "minimum": -7, "maximum": 7 }
+        "keySignature": { "type": "integer", "minimum": -7, "maximum": 7 },
+        "keyChanges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["beat", "fifths"],
+            "properties": {
+              "beat": { "type": "number", "minimum": 0 },
+              "fifths": { "type": "integer", "minimum": -7, "maximum": 7 }
+            }
+          }
+        },
+        "clefChanges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["beat", "clef"],
+            "properties": {
+              "beat": { "type": "number", "minimum": 0 },
+              "clef": { "enum": ["treble", "bass"] }
+            }
+          }
+        },
+        "repeats": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["beat", "type"],
+            "properties": {
+              "beat": { "type": "number", "minimum": 0 },
+              "type": { "enum": ["start", "end"] }
+            }
+          }
+        }
       }
     },
     "audioGuide": {
@@ -84,7 +120,9 @@
           "durationBeats": { "type": "number", "exclusiveMinimum": 0 },
           "numeral": { "type": "string" },
           "lyric": { "type": "string" },
-          "spelling": { "type": "string", "pattern": "^[A-G][♯♭#b]?-?[0-9]+$" }
+          "spelling": { "type": "string", "pattern": "^[A-G][♯♭#b]?-?[0-9]+$" },
+          "explicitAccidental": { "enum": ["flat", "natural", "sharp"] },
+          "tieToNext": { "type": "boolean" }
         }
       }
     }

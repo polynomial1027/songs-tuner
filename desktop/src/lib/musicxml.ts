@@ -1,5 +1,5 @@
 import type { PitchScore, ScoreNote } from "../types";
-import { createEmptyScore, makeNoteId, measureLengthBeats, midiSpelling, parseSpelling } from "./composer";
+import { createEmptyScore, makeNoteId, measureLengthBeats, mergeTiedNotes, midiSpelling, parseSpelling, scoreEndBeat } from "./composer";
 import { validateScore } from "./score";
 
 const TYPE_BY_BEATS: Array<[number, string]> = [
@@ -25,31 +25,65 @@ export function scoreToMusicXml(score: PitchScore): string {
   const divisions = 480;
   const beatsPerMeasure = measureLengthBeats(score);
   const totalMeasures = Math.max(1, Math.ceil(
-    score.notes.reduce((end, note) => Math.max(end, note.beat + note.durationBeats), 0) / beatsPerMeasure,
+    scoreEndBeat(score) / beatsPerMeasure,
   ));
   const measures = Array.from({ length: totalMeasures }, (_, measureIndex) => {
     const startBeat = measureIndex * beatsPerMeasure;
     const endBeat = startBeat + beatsPerMeasure;
     const notes = score.notes.filter((note) => note.beat >= startBeat && note.beat < endBeat);
+    const keyChanges = (score.notation?.keyChanges ?? []).filter((change) => change.beat >= startBeat && change.beat < endBeat);
+    const clefChanges = (score.notation?.clefChanges ?? []).filter((change) => change.beat >= startBeat && change.beat < endBeat);
+    const timeline = [
+      ...keyChanges
+        .filter((change) => measureIndex > 0 || change.beat > 0.0001)
+        .map((change) => ({ beat: change.beat, order: 0, xml: `<attributes><key><fifths>${change.fifths}</fifths></key></attributes>` })),
+      ...clefChanges
+        .filter((change) => measureIndex > 0 || change.beat > 0.0001)
+        .map((change) => ({ beat: change.beat, order: 0, xml: `<attributes><clef><sign>${change.clef === "bass" ? "F" : "G"}</sign><line>${change.clef === "bass" ? 4 : 2}</line></clef></attributes>` })),
+      ...notes.map((note) => ({ beat: note.beat, order: 1, note })),
+    ].sort((a, b) => a.beat - b.beat || a.order - b.order);
     let cursor = startBeat;
     const body: string[] = [];
-    for (const note of notes) {
-      if (note.beat > cursor) {
-        const gap = note.beat - cursor;
+    for (const item of timeline) {
+      if (item.beat > cursor) {
+        const gap = item.beat - cursor;
         body.push(`<note><rest/><duration>${Math.round(gap * divisions)}</duration><type>${typeForDuration(gap).type}</type></note>`);
+        cursor = item.beat;
       }
+      if (!("note" in item)) {
+        body.push(item.xml);
+        continue;
+      }
+      const note = item.note;
       const notation = typeForDuration(note.durationBeats);
       const pitch = note.midi === null ? "<rest/>" : (() => {
         const spelling = parseSpelling(note.spelling || midiSpelling(note.midi, score.notation?.keySignature));
         return `<pitch><step>${spelling.step}</step>${spelling.alter ? `<alter>${spelling.alter}</alter>` : ""}<octave>${spelling.octave}</octave></pitch>`;
       })();
-      body.push(`<note>${pitch}<duration>${Math.round(note.durationBeats * divisions)}</duration><type>${notation.type}</type>${notation.dotted ? "<dot/>" : ""}${note.lyric ? `<lyric><text>${escapeXml(note.lyric)}</text></lyric>` : ""}</note>`);
+      const noteIndex = score.notes.findIndex((candidate) => candidate.id === note.id);
+      const previousTied = Boolean(score.notes[noteIndex - 1]?.tieToNext && score.notes[noteIndex - 1]?.midi === note.midi);
+      const tieTags = `${previousTied ? '<tie type="stop"/>' : ""}${note.tieToNext ? '<tie type="start"/>' : ""}`;
+      const tiedNotation = previousTied || note.tieToNext
+        ? `<notations>${previousTied ? '<tied type="stop"/>' : ""}${note.tieToNext ? '<tied type="start"/>' : ""}</notations>`
+        : "";
+      const accidental = note.explicitAccidental ? `<accidental>${note.explicitAccidental}</accidental>` : "";
+      body.push(`<note>${pitch}<duration>${Math.round(note.durationBeats * divisions)}</duration>${tieTags}<type>${notation.type}</type>${notation.dotted ? "<dot/>" : ""}${accidental}${tiedNotation}${note.lyric ? `<lyric><text>${escapeXml(note.lyric)}</text></lyric>` : ""}</note>`);
       cursor = note.beat + note.durationBeats;
+    }
+    if (cursor < endBeat) {
+      const gap = endBeat - cursor;
+      body.push(`<note><rest/><duration>${Math.round(gap * divisions)}</duration><type>${typeForDuration(gap).type}</type></note>`);
     }
     const attributes = measureIndex === 0
       ? `<attributes><divisions>${divisions}</divisions><key><fifths>${score.notation?.keySignature ?? 0}</fifths></key><time><beats>${score.timeSignature.beats}</beats><beat-type>${score.timeSignature.beatUnit}</beat-type></time><clef><sign>${score.notation?.clef === "bass" ? "F" : "G"}</sign><line>${score.notation?.clef === "bass" ? 4 : 2}</line></clef></attributes><direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${score.tempo.bpm}</per-minute></metronome></direction-type><sound tempo="${score.tempo.bpm}"/></direction>`
       : "";
-    return `<measure number="${measureIndex + 1}">${attributes}${body.join("")}</measure>`;
+    const repeatStart = score.notation?.repeats?.some((marker) => marker.type === "start" && Math.abs(marker.beat - startBeat) < 0.0001)
+      ? '<barline location="left"><repeat direction="forward"/></barline>'
+      : "";
+    const repeatEnd = score.notation?.repeats?.some((marker) => marker.type === "end" && Math.abs(marker.beat - startBeat) < 0.0001)
+      ? '<barline location="left"><repeat direction="backward"/></barline>'
+      : "";
+    return `<measure number="${measureIndex + 1}">${attributes}${repeatStart}${repeatEnd}${body.join("")}</measure>`;
   });
   return `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
@@ -82,10 +116,25 @@ export function musicXmlToScore(xml: string): PitchScore {
   const fifths = Number(textOf(firstMeasure ?? documentNode.documentElement, "key fifths")) || 0;
   const clef = textOf(firstMeasure ?? documentNode.documentElement, "clef sign") === "F" ? "bass" : "treble";
   const notes: ScoreNote[] = [];
+  const keyChanges: NonNullable<PitchScore["notation"]>["keyChanges"] = [];
+  const clefChanges: NonNullable<PitchScore["notation"]>["clefChanges"] = [];
+  const repeats: NonNullable<PitchScore["notation"]>["repeats"] = [];
   let absoluteBeat = 0;
   documentNode.querySelectorAll("part measure").forEach((measure, measureIndex) => {
     let cursor = measureIndex * beatsPerMeasure;
-    measure.querySelectorAll(":scope > note, :scope > forward, :scope > backup").forEach((node) => {
+    measure.querySelectorAll(":scope > note, :scope > forward, :scope > backup, :scope > attributes, :scope > barline").forEach((node) => {
+      if (node.tagName === "attributes") {
+        const keyValue = textOf(node, "key fifths");
+        const clefValue = textOf(node, "clef sign");
+        if (keyValue && (measureIndex > 0 || cursor > 0.0001)) keyChanges.push({ beat: cursor, fifths: Math.max(-7, Math.min(7, Number(keyValue))) });
+        if (clefValue && (measureIndex > 0 || cursor > 0.0001)) clefChanges.push({ beat: cursor, clef: clefValue === "F" ? "bass" : "treble" });
+        return;
+      }
+      if (node.tagName === "barline") {
+        const direction = node.querySelector("repeat")?.getAttribute("direction");
+        if (direction) repeats.push({ beat: cursor, type: direction === "forward" ? "start" : "end" });
+        return;
+      }
       const duration = (Number(textOf(node, "duration")) || divisions) / divisions;
       if (node.tagName === "forward") {
         cursor += duration;
@@ -114,6 +163,8 @@ export function musicXmlToScore(xml: string): PitchScore {
         durationBeats: duration,
         spelling,
         lyric: textOf(node, "lyric text") || undefined,
+        explicitAccidental: (textOf(node, "accidental") || undefined) as ScoreNote["explicitAccidental"],
+        tieToNext: Boolean(node.querySelector('tie[type="start"], tied[type="start"]')),
       });
       cursor += duration;
       absoluteBeat = Math.max(absoluteBeat, cursor);
@@ -130,7 +181,13 @@ export function musicXmlToScore(xml: string): PitchScore {
     },
     tempo: { bpm: Math.max(20, Math.min(300, bpm)) },
     timeSignature: { beats, beatUnit },
-    notation: { clef, keySignature: Math.max(-7, Math.min(7, fifths)) },
+    notation: {
+      clef,
+      keySignature: Math.max(-7, Math.min(7, fifths)),
+      keyChanges,
+      clefChanges,
+      repeats,
+    },
     notes: notes.sort((a, b) => a.beat - b.beat),
   });
 }
@@ -167,7 +224,7 @@ export function scoreToMidi(score: PitchScore): Uint8Array {
   const micros = Math.round(60_000_000 / score.tempo.bpm);
   events.push({ tick: 0, order: 0, bytes: [0xff, 0x51, 0x03, ...numberBytes(micros, 3)] });
   events.push({ tick: 0, order: 0, bytes: [0xff, 0x58, 0x04, score.timeSignature.beats, Math.log2(score.timeSignature.beatUnit), 24, 8] });
-  for (const note of score.notes) {
+  for (const note of mergeTiedNotes(score).notes) {
     if (note.midi === null) continue;
     const start = Math.round(note.beat * division);
     const end = Math.round((note.beat + note.durationBeats) * division);
