@@ -42,6 +42,10 @@ button { color: inherit; }
 .song-copy small { font-size: 10px; color: #8fa098; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .import-button { width: 100%; margin-top: 12px; border: 1px dashed #4b6055; border-radius: 12px; background: transparent; color: #b4c2ba; padding: 11px; display: flex; justify-content: center; align-items: center; gap: 8px; cursor: pointer; }
 .import-button:hover { border-color: var(--orange); color: #fff; }
+.composer-launch { width: 100%; margin-top: 7px; border: 0; border-radius: 12px; padding: 10px 11px; display: flex; align-items: center; gap: 9px; text-align: left; color: #1b2c22; background: var(--orange); cursor: pointer; }
+.composer-launch > span { display: grid; gap: 1px; }
+.composer-launch strong { font-size: 10px; }
+.composer-launch small { font-size: 8px; color: #785129; }
 .sidebar-spacer { flex: 1; }
 .privacy-note { display: flex; gap: 10px; margin: 12px 7px 18px; padding: 12px; border-radius: 12px; background: #213129; color: #91a299; }
 .privacy-note div { display: grid; gap: 2px; }
@@ -128,7 +132,7 @@ button { color: inherit; }
 .skip-button { border: 1px solid var(--line); background: #f6f4ed; border-radius: 10px; width: 40px; height: 40px; display: grid; place-items: center; cursor: pointer; }
 .skip-button:disabled { opacity: .35; cursor: default; }
 
-.lower-grid { display: grid; grid-template-columns: 1.45fr .8fr .8fr; gap: 12px; margin-top: 13px; }
+.lower-grid { display: grid; grid-template-columns: 1.35fr .75fr .75fr .85fr; gap: 12px; margin-top: 13px; }
 .upload-card, .quick-card { background: #e7e3d9; border: 1px solid #d8d4ca; border-radius: 15px; padding: 14px; display: flex; align-items: center; gap: 11px; position: relative; overflow: hidden; }
 .mini-icon { width: 37px; height: 37px; border-radius: 10px; background: #f8f6f0; display: grid; place-items: center; color: var(--green); }
 .upload-copy { display: grid; gap: 2px; flex: 1; }.upload-copy strong { font-size: 11px; }.upload-copy span { font-size: 8px; color: #818c85; }
@@ -138,6 +142,7 @@ button { color: inherit; }
 .quick-card > svg { color: var(--green); }
 .quick-card div { display: grid; gap: 2px; flex: 1; }.quick-card span { font-size: 8px; color: #87918b; }.quick-card strong { font-size: 10px; white-space: nowrap; }
 .quick-card button { background: transparent; color: #506158; padding: 5px; text-decoration: underline; }
+.composer-quick-card { background: #e0e6df; border-color: #ccd5ce; }
 
 .review-card { margin-top: 18px; padding: 25px; }
 .review-head { display: flex; justify-content: space-between; align-items: center; }
@@ -174,7 +179,7 @@ button { color: inherit; }
   .mode-row { align-items: flex-end; }
   .mode-tabs small { display: none; }
   .lower-grid { grid-template-columns: 1fr 1fr; }
-  .upload-card { grid-column: 1 / -1; }
+  .upload-card { grid-column: 1 / 2; }
   .pitch-panel { grid-template-columns: 130px minmax(290px, 1fr) 130px; }
 }
 

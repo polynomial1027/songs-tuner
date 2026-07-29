@@ -20,6 +20,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Sparkles,
+  SquarePen,
   Target,
   Upload,
   Volume2,
@@ -28,9 +29,11 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import ascendingScale from "./data/ascending-scale.json";
 import emptySong from "./data/empty-song.json";
+import { createEmptyScore } from "./lib/composer";
 import { centsBetweenFrequency, clampCents, frequencyToMidi, midiToFrequency, midiToNoteName, numeralForMidi, signed } from "./lib/music";
 import { analyzeAudioFile, detectPitchYin } from "./lib/pitch";
 import { buildSessionResult, noteAtSeconds, parseScoreFile, scoreDurationSeconds, validateScore } from "./lib/score";
+import ScoreEditor from "./ScoreEditor";
 import type { AnalysisFrame, PitchReading, PitchScore, PracticeMode, SessionResult } from "./types";
 
 const BUILT_IN_SCORES = [validateScore(ascendingScale), validateScore(emptySong)];
@@ -70,6 +73,7 @@ function App() {
   const [analysisProgress, setAnalysisProgress] = useState<number | null>(null);
   const [toast, setToast] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [editorSeed, setEditorSeed] = useState<PitchScore | null>(null);
 
   const scoreInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -389,6 +393,24 @@ function App() {
   const gaugePosition = liveCents === null ? 50 : (clampCents(liveCents) + 100) / 2 * 100;
   const statusLabel = captureStatus === "listening" ? "麦克风已连接" : captureStatus === "requesting" ? "正在请求权限" : "麦克风未连接";
 
+  if (editorSeed) {
+    return (
+      <ScoreEditor
+        initialScore={editorSeed}
+        onClose={() => setEditorSeed(null)}
+        onCommit={(score, close) => {
+          setScores((current) => [...current.filter((candidate) => candidate.metadata.id !== score.metadata.id), score]);
+          setSelectedId(score.metadata.id);
+          setTranspose(0);
+          setStepIndex(0);
+          setPlayhead(0);
+          setSessionResult(null);
+          if (close) setEditorSeed(null);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -427,6 +449,10 @@ function App() {
           </div>
           <button className="import-button" onClick={() => scoreInputRef.current?.click()}>
             <FileUp size={17} /> 导入曲谱
+          </button>
+          <button className="composer-launch" onClick={() => setEditorSeed(createEmptyScore())}>
+            <SquarePen size={17} />
+            <span><strong>新建五线谱</strong><small>点谱 · 试听 · 音频对齐</small></span>
           </button>
           <input
             ref={scoreInputRef}
@@ -583,6 +609,11 @@ function App() {
             <ArrowDownToLine size={20} />
             <div><span>曲谱模板</span><strong>.singright.json v1</strong></div>
             <button onClick={downloadTemplate}>下载</button>
+          </div>
+          <div className="quick-card composer-quick-card">
+            <SquarePen size={20} />
+            <div><span>五线谱工作台</span><strong>编辑当前曲谱并试听</strong></div>
+            <button onClick={() => setEditorSeed(selectedScore)}>打开</button>
           </div>
         </section>
 

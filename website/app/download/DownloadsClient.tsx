@@ -15,7 +15,7 @@ interface LatestRelease {
   assets: ReleaseAsset[];
 }
 
-const RELEASES_URL = "https://github.com/polynomial1027/songs-tuner/releases/latest";
+const RELEASES_URL = "https://github.com/polynomial1027/songs-tuner/releases";
 
 const platforms = [
   {
@@ -52,11 +52,11 @@ export default function DownloadsClient() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    fetch("https://api.github.com/repos/polynomial1027/songs-tuner/releases/latest", {
+    fetch("https://api.github.com/repos/polynomial1027/songs-tuner/releases?per_page=10", {
       headers: { Accept: "application/vnd.github+json" },
     })
-      .then((response) => response.ok ? response.json() as Promise<LatestRelease> : Promise.reject())
-      .then(setRelease)
+      .then((response) => response.ok ? response.json() as Promise<Array<LatestRelease & { draft?: boolean }>> : Promise.reject())
+      .then((releases) => setRelease(releases.find((candidate) => !candidate.draft) ?? null))
       .catch(() => setRelease(null))
       .finally(() => setLoaded(true));
   }, []);

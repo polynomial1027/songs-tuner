@@ -7,6 +7,7 @@ export interface ScoreNote {
   durationBeats: number;
   numeral?: string;
   lyric?: string;
+  spelling?: string;
 }
 
 export interface PitchScore {
@@ -22,6 +23,18 @@ export interface PitchScore {
   tempo: { bpm: number };
   timeSignature: { beats: number; beatUnit: 1 | 2 | 4 | 8 | 16 };
   tuning: { referenceHz: number; tonicMidi: number };
+  notation?: {
+    clef: "treble" | "bass";
+    keySignature: number;
+  };
+  audioGuide?: {
+    name: string;
+    trimStartSeconds: number;
+    trimEndSeconds?: number;
+    offsetSeconds: number;
+    gain: number;
+    playbackRate: number;
+  };
   notes: ScoreNote[];
 }
 

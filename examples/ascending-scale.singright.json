@@ -11,6 +11,7 @@
   "tempo": { "bpm": 72 },
   "timeSignature": { "beats": 4, "beatUnit": 4 },
   "tuning": { "referenceHz": 440, "tonicMidi": 60 },
+  "notation": { "clef": "treble", "keySignature": 0 },
   "notes": [
     { "id": "c4", "midi": 60, "beat": 0, "durationBeats": 2, "numeral": "1", "lyric": "哆" },
     { "id": "d4", "midi": 62, "beat": 2, "durationBeats": 2, "numeral": "2", "lyric": "来" },

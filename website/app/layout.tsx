@@ -31,23 +31,23 @@ export async function generateMetadata(): Promise<Metadata> {
       template: "%s · SingRight 准唱",
     },
     description:
-      "跨平台实时歌唱音准训练器。支持逐音校准、连续跟唱、整曲复盘、统一曲谱导入和录音分析。",
+      "跨平台歌唱音准训练与五线谱制谱软件。支持点谱、参考音频对齐、逐音校准、连续跟唱、整曲复盘和录音分析。",
     icons: {
       icon: "/icon.png",
       shortcut: "/icon.png",
     },
     openGraph: {
       title: "SingRight 准唱 — 练准每一个音",
-      description: "麦克风实时校准、逐音练习、连续跟唱与整曲复盘。",
-      images: ["/og.png"],
+      description: "五线谱打谱、参考音频波形对齐、麦克风实时校准与整曲复盘。",
+      images: ["/og-v2.png"],
       type: "website",
       locale: "zh_CN",
     },
     twitter: {
       card: "summary_large_image",
       title: "SingRight 准唱 — 练准每一个音",
-      description: "跨平台实时歌唱音准训练器。",
-      images: ["/og.png"],
+      description: "跨平台五线谱制谱与实时歌唱音准训练器。",
+      images: ["/og-v2.png"],
     },
   };
 }

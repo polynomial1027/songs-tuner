@@ -70,11 +70,14 @@ jobs:
           tagName: v__VERSION__
           releaseName: "SingRight 准唱 v__VERSION__"
           releaseBody: |
-            SingRight 准唱首个预览版。
+            SingRight 准唱 v0.2 新增完整五线谱制谱工作台。
 
             - 实时麦克风音高检测
             - 逐音校准、连续跟唱、整曲复盘
-            - `.singright.json` 曲谱导入
+            - 五线谱点谱、键盘录入、歌词与完整时值编辑
+            - 参考音频波形、裁剪、速度和拍点对齐
+            - 合成音试听、节拍器、预备拍和小节循环
+            - SingRight JSON、MusicXML 与 MIDI 格式互通
             - 录音上传分析和本地录音保存
             - 移调、首音定调、A4 基准和容差设置
 

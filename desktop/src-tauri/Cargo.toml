@@ -1,7 +1,7 @@
 [package]
 name = "singright"
-version = "0.1.0"
-description = "Cross-platform singing pitch trainer"
+version = "0.2.0"
+description = "Cross-platform score editor and singing pitch trainer"
 authors = ["polynomial1027"]
 edition = "2021"
 

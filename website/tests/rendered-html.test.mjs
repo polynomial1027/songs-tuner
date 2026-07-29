@@ -34,6 +34,7 @@ test("server-renders the SingRight landing page", async () => {
   assert.match(html, /SingRight/);
   assert.match(html, /把每一个音/);
   assert.match(html, /逐音校准/);
+  assert.match(html, /五线谱制谱软件/);
   assert.match(html, /\.singright\.json/);
   assert.match(html, /音频只在本机处理/);
   assert.doesNotMatch(html, /codex-preview/);
@@ -49,6 +50,8 @@ test("removes starter metadata and preview files", async () => {
 
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(page, /SingRight/);
+  assert.match(page, /五线谱编辑器/);
+  assert.match(page, /MusicXML/);
   assert.match(layout, /SingRight 准唱/);
   assert.doesNotMatch(layout, /Starter Project|codex-preview|_sites-preview/);
 

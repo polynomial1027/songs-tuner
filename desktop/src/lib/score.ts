@@ -21,6 +21,26 @@ export function validateScore(value: unknown): PitchScore {
   if (!isRecord(value.tuning) || typeof value.tuning.referenceHz !== "number" || typeof value.tuning.tonicMidi !== "number") {
     throw new Error("tuning.referenceHz 和 tuning.tonicMidi 必须存在");
   }
+  if (value.notation !== undefined) {
+    if (!isRecord(value.notation) || (value.notation.clef !== "treble" && value.notation.clef !== "bass")
+      || typeof value.notation.keySignature !== "number" || value.notation.keySignature < -7 || value.notation.keySignature > 7) {
+      throw new Error("notation 的谱号或调号无效");
+    }
+  }
+  if (value.audioGuide !== undefined) {
+    if (!isRecord(value.audioGuide) || typeof value.audioGuide.name !== "string"
+      || typeof value.audioGuide.trimStartSeconds !== "number"
+      || typeof value.audioGuide.offsetSeconds !== "number"
+      || typeof value.audioGuide.gain !== "number"
+      || typeof value.audioGuide.playbackRate !== "number"
+      || value.audioGuide.trimStartSeconds < 0
+      || value.audioGuide.gain < 0 || value.audioGuide.gain > 1
+      || value.audioGuide.playbackRate < 0.25 || value.audioGuide.playbackRate > 2
+      || (value.audioGuide.trimEndSeconds !== undefined
+        && (typeof value.audioGuide.trimEndSeconds !== "number" || value.audioGuide.trimEndSeconds < value.audioGuide.trimStartSeconds))) {
+      throw new Error("audioGuide 参考音频设置无效");
+    }
+  }
   if (!Array.isArray(value.notes)) throw new Error("notes 必须是数组");
 
   let previousEnd = 0;

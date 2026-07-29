@@ -10,5 +10,6 @@
   "tempo": { "bpm": 80 },
   "timeSignature": { "beats": 4, "beatUnit": 4 },
   "tuning": { "referenceHz": 440, "tonicMidi": 60 },
+  "notation": { "clef": "treble", "keySignature": 0 },
   "notes": []
 }

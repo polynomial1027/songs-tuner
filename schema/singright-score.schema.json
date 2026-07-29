@@ -44,6 +44,28 @@
         "tonicMidi": { "type": "integer", "minimum": 0, "maximum": 127 }
       }
     },
+    "notation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clef", "keySignature"],
+      "properties": {
+        "clef": { "enum": ["treble", "bass"] },
+        "keySignature": { "type": "integer", "minimum": -7, "maximum": 7 }
+      }
+    },
+    "audioGuide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "trimStartSeconds", "offsetSeconds", "gain", "playbackRate"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "trimStartSeconds": { "type": "number", "minimum": 0 },
+        "trimEndSeconds": { "type": "number", "minimum": 0 },
+        "offsetSeconds": { "type": "number" },
+        "gain": { "type": "number", "minimum": 0, "maximum": 1 },
+        "playbackRate": { "type": "number", "minimum": 0.25, "maximum": 2 }
+      }
+    },
     "notes": {
       "type": "array",
       "items": {
@@ -61,7 +83,8 @@
           "beat": { "type": "number", "minimum": 0 },
           "durationBeats": { "type": "number", "exclusiveMinimum": 0 },
           "numeral": { "type": "string" },
-          "lyric": { "type": "string" }
+          "lyric": { "type": "string" },
+          "spelling": { "type": "string", "pattern": "^[A-G][♯♭#b]?-?[0-9]+$" }
         }
       }
     }

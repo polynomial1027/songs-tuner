@@ -23,7 +23,7 @@ export default function DownloadPage() {
       <header className="download-hero wrap">
         <div className="hero-kicker"><i /> 免费 · 开源 · 本机处理</div>
         <h1>选择你的系统，<br /><em>开始练准。</em></h1>
-        <p>不需要账户。首次启动后允许麦克风权限，就可以打开示例音阶开始练习。</p>
+        <p>不需要账户。既可以打开示例音阶练唱，也可以在五线谱工作台里从零制作自己的曲谱。</p>
       </header>
       <DownloadsClient />
       <section className="install-notes wrap">
@@ -35,7 +35,7 @@ export default function DownloadPage() {
         <ol>
           <li><i>01</i><span><strong>安装并打开</strong><small>选择适合系统的安装包</small></span></li>
           <li><i>02</i><span><strong>允许麦克风</strong><small>声音只在当前设备处理</small></span></li>
-          <li><i>03</i><span><strong>唱出第一个音</strong><small>从示例音阶或导入曲谱开始</small></span></li>
+          <li><i>03</i><span><strong>打谱或开始练唱</strong><small>用五线谱编辑器制作旋律，或从示例音阶开始</small></span></li>
         </ol>
       </section>
       <footer>
