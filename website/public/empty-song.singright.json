@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/polynomial1027/songs-tuner/main/schema/singright-score.schema.json",
+  "format": "singright-score",
+  "version": 1,
+  "metadata": {
+    "id": "empty-song-template",
+    "title": "My Song",
+    "artist": "",
+    "description": "Blank SingRight score template."
+  },
+  "tempo": { "bpm": 80 },
+  "timeSignature": { "beats": 4, "beatUnit": 4 },
+  "tuning": { "referenceHz": 440, "tonicMidi": 60 },
+  "notation": { "clef": "treble", "keySignature": 0 },
+  "notes": []
+}

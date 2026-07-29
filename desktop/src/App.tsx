@@ -29,7 +29,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import ascendingScale from "./data/ascending-scale.json";
 import emptySong from "./data/empty-song.json";
+import { localize, useI18n } from "./i18n";
 import { createEmptyScore } from "./lib/composer";
+import { downloadBlob } from "./lib/download";
 import { centsBetweenFrequency, clampCents, frequencyToMidi, midiToFrequency, midiToNoteName, numeralForMidi, signed } from "./lib/music";
 import { analyzeAudioFile, detectPitchYin } from "./lib/pitch";
 import { buildSessionResult, noteAtSeconds, parseScoreFile, scoreDurationSeconds, validateScore } from "./lib/score";
@@ -37,10 +39,11 @@ import ScoreEditor from "./ScoreEditor";
 import type { AnalysisFrame, PitchReading, PitchScore, PracticeMode, SessionResult } from "./types";
 
 const BUILT_IN_SCORES = [validateScore(ascendingScale), validateScore(emptySong)];
-const MODE_COPY: Record<PracticeMode, { label: string; short: string }> = {
-  step: { label: "逐音校准", short: "唱准并保持，自动进入下一个音" },
-  continuous: { label: "连续跟唱", short: "按节奏和时值实时判断" },
-  review: { label: "整曲复盘", short: "录完一遍，集中纠错" },
+type TolerancePreset = "relaxed" | "standard" | "strict" | "custom";
+const TOLERANCE_VALUES: Record<Exclude<TolerancePreset, "custom">, number> = {
+  relaxed: 60,
+  standard: 35,
+  strict: 20,
 };
 
 type CaptureStatus = "idle" | "requesting" | "listening" | "error";
@@ -52,13 +55,30 @@ function findPitchedIndex(score: PitchScore, from: number, direction: 1 | -1): n
   return -1;
 }
 
+function scoreDisplayText(score: PitchScore, locale: "zh-CN" | "en"): { title: string; description: string } {
+  if (score.metadata.id === "ascending-c-major-scale") {
+    return locale === "zh-CN"
+      ? { title: "从低到高 · C 大调音阶", description: "从中央 C 唱到高音 C，适合热身和熟悉实时音准反馈。" }
+      : { title: "Ascending · C major scale", description: "Sing from middle C to high C to warm up and learn the live pitch display." };
+  }
+  if (score.metadata.id === "empty-song-template") {
+    return locale === "zh-CN"
+      ? { title: "我的第二首曲目", description: "空白曲目模板：导入曲谱或在编辑器里开始打谱。" }
+      : { title: "My Second Song", description: "Blank template: import a score or start composing in the editor." };
+  }
+  return { title: score.metadata.title, description: score.metadata.description ?? "" };
+}
+
 function App() {
+  const { locale, setLocale } = useI18n();
+  const tr = (zh: string, en: string) => localize(locale, zh, en);
   const [scores, setScores] = useState<PitchScore[]>(BUILT_IN_SCORES);
   const [selectedId, setSelectedId] = useState(BUILT_IN_SCORES[0].metadata.id);
   const [mode, setMode] = useState<PracticeMode>("step");
   const [transpose, setTranspose] = useState(0);
   const [referenceHz, setReferenceHz] = useState(440);
-  const [toleranceCents, setToleranceCents] = useState(30);
+  const [toleranceCents, setToleranceCents] = useState(35);
+  const [tolerancePreset, setTolerancePreset] = useState<TolerancePreset>("standard");
   const [holdGoalMs, setHoldGoalMs] = useState(650);
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>("idle");
   const [captureError, setCaptureError] = useState("");
@@ -96,6 +116,24 @@ function App() {
     () => scores.find((candidate) => candidate.metadata.id === selectedId) ?? scores[0],
     [scores, selectedId],
   );
+  const selectedDisplay = scoreDisplayText(selectedScore, locale);
+  const modeCopy: Record<PracticeMode, { label: string; short: string; detail: string }> = {
+    step: {
+      label: tr("逐音校准", "Note by note"),
+      short: tr("不计时值，唱准后自动前进", "No timing; advance after holding pitch"),
+      detail: tr("只练音高，不追拍点。适合慢速拆解难句。", "Pitch only, without rhythm scoring. Best for isolating difficult phrases."),
+    },
+    continuous: {
+      label: tr("连续跟唱", "Live follow"),
+      short: tr("跟时间线唱，实时看偏差", "Follow the timeline with live feedback"),
+      detail: tr("音高与时值同时判断，过程中始终显示实时 cents，像 KTV 一样边唱边改。", "Scores pitch and timing while always showing live cents, so you can correct yourself as you sing."),
+    },
+    review: {
+      label: tr("整曲复盘", "Full-take review"),
+      short: tr("专注唱完，再看逐音报告", "Sing first, inspect the report afterward"),
+      detail: tr("录制完整一遍，演唱时隐藏 cents，结束后给出逐音报告并保留本机录音。", "Records a full take and hides cents while singing, then shows a note-by-note report and local recording."),
+    },
+  };
   const totalDuration = scoreDurationSeconds(selectedScore);
   const activeIndex = mode === "step"
     ? Math.min(stepIndex, Math.max(0, selectedScore.notes.length - 1))
@@ -145,12 +183,12 @@ function App() {
       const nextIndex = findPitchedIndex(selectedScore, stepIndex + 1, 1);
       if (nextIndex < 0) {
         setActive(false);
-        setToast("逐音练习完成，很稳！");
+        setToast(tr("逐音练习完成，很稳！", "Note-by-note practice complete. Nicely controlled."));
       } else {
         setStepIndex(nextIndex);
       }
     }
-  }, [active, holdGoalMs, reading, referenceHz, selectedScore.notes.length, stepIndex, targetMidi, toleranceCents]);
+  }, [active, holdGoalMs, locale, reading, referenceHz, selectedScore.notes.length, stepIndex, targetMidi, toleranceCents]);
 
   useEffect(() => {
     return () => {
@@ -166,7 +204,7 @@ function App() {
     if (streamRef.current?.active) return streamRef.current;
     if (!navigator.mediaDevices?.getUserMedia) {
       setCaptureStatus("error");
-      setCaptureError("当前系统不支持麦克风访问");
+      setCaptureError(tr("当前系统不支持麦克风访问", "Microphone access is unavailable on this system."));
       throw new Error("Microphone API unavailable");
     }
     setCaptureStatus("requesting");
@@ -226,8 +264,8 @@ function App() {
     } catch (error) {
       setCaptureStatus("error");
       setCaptureError(error instanceof DOMException && error.name === "NotAllowedError"
-        ? "麦克风权限被拒绝，请在系统设置中允许 SingRight 使用麦克风"
-        : "无法打开麦克风，请检查输入设备");
+        ? tr("麦克风权限被拒绝，请在系统设置中允许 SingRight 使用麦克风", "Microphone permission was denied. Allow SingRight in system settings.")
+        : tr("无法打开麦克风，请检查输入设备", "Could not open the microphone. Check your input device."));
       throw error;
     }
   }
@@ -267,7 +305,7 @@ function App() {
 
   async function startPractice() {
     if (selectedScore.notes.length === 0) {
-      setToast("这是空白曲目，请先导入曲谱");
+      setToast(tr("这是空白曲目，请先导入曲谱", "This score is blank. Import or create a score first."));
       scoreInputRef.current?.click();
       return;
     }
@@ -311,10 +349,14 @@ function App() {
         sessionFramesRef.current,
         transpose,
         toleranceCents,
-        completed ? `${selectedScore.metadata.title} · 完整演唱` : `${selectedScore.metadata.title} · 提前结束`,
+        completed
+          ? `${selectedScore.metadata.title} · ${tr("完整演唱", "Full take")}`
+          : `${selectedScore.metadata.title} · ${tr("提前结束", "Stopped early")}`,
       );
       setSessionResult(result);
-      setToast(completed ? `本次音准得分 ${result.score}` : "已生成本次练习复盘");
+      setToast(completed
+        ? tr(`本次音准得分 ${result.score}`, `Pitch score: ${result.score}`)
+        : tr("已生成本次练习复盘", "Your practice review is ready."));
     }
   }
 
@@ -338,9 +380,9 @@ function App() {
       setSelectedId(imported.metadata.id);
       setTranspose(0);
       setSessionResult(null);
-      setToast(`已导入《${imported.metadata.title}》`);
+      setToast(tr(`已导入《${imported.metadata.title}》`, `Imported “${imported.metadata.title}”.`));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "曲谱导入失败");
+      setToast(error instanceof Error && locale === "zh-CN" ? error.message : tr("曲谱导入失败", "Score import failed."));
     } finally {
       if (scoreInputRef.current) scoreInputRef.current.value = "";
     }
@@ -349,7 +391,7 @@ function App() {
   async function handleAudioImport(file: File | undefined) {
     if (!file) return;
     if (selectedScore.notes.length === 0) {
-      setToast("请先选择或导入一个有音符的曲谱");
+      setToast(tr("请先选择或导入一个有音符的曲谱", "Choose or import a score containing notes first."));
       return;
     }
     try {
@@ -361,9 +403,9 @@ function App() {
       }));
       const result = buildSessionResult(selectedScore, frames, transpose, toleranceCents, file.name);
       setSessionResult(result);
-      setToast(`录音分析完成，音准得分 ${result.score}`);
+      setToast(tr(`录音分析完成，音准得分 ${result.score}`, `Recording analyzed. Pitch score: ${result.score}.`));
     } catch {
-      setToast("无法解码这份录音，请尝试 WAV、MP3、M4A 或 WebM");
+      setToast(tr("无法解码这份录音，请尝试 WAV、MP3、M4A 或 WebM", "Could not decode this recording. Try WAV, MP3, M4A, or WebM."));
     } finally {
       setAnalysisProgress(null);
       if (audioInputRef.current) audioInputRef.current.value = "";
@@ -373,25 +415,29 @@ function App() {
   function captureTonic() {
     const firstNote = selectedScore.notes.find((note) => note.midi !== null);
     if (!reading || !firstNote || firstNote.midi === null) {
-      setToast("请先打开麦克风并唱出你想要的第一个音");
+      setToast(tr("请先打开麦克风并唱出你想要的第一个音", "Connect the microphone and sing the first note you want to use."));
       return;
     }
     const shift = Math.max(-12, Math.min(12, Math.round(reading.midi - firstNote.midi)));
     setTranspose(shift);
-    setToast(`已将当前音设为首音：${shift >= 0 ? "+" : ""}${shift} 半音`);
+    setToast(tr(
+      `已将当前音设为首音：${shift >= 0 ? "+" : ""}${shift} 半音`,
+      `First note set: ${shift >= 0 ? "+" : ""}${shift} semitones.`,
+    ));
   }
 
   function downloadTemplate() {
     const blob = new Blob([JSON.stringify(emptySong, null, 2)], { type: "application/json" });
-    const anchor = document.createElement("a");
-    anchor.href = URL.createObjectURL(blob);
-    anchor.download = "my-song.singright.json";
-    anchor.click();
-    URL.revokeObjectURL(anchor.href);
+    downloadBlob(blob, "my-song.singright.json");
+    setToast(tr("空白曲谱模板已下载", "Blank score template downloaded."));
   }
 
   const gaugePosition = liveCents === null ? 50 : (clampCents(liveCents) + 100) / 2 * 100;
-  const statusLabel = captureStatus === "listening" ? "麦克风已连接" : captureStatus === "requesting" ? "正在请求权限" : "麦克风未连接";
+  const statusLabel = captureStatus === "listening"
+    ? tr("麦克风已连接", "Microphone connected")
+    : captureStatus === "requesting"
+      ? tr("正在请求权限", "Requesting access")
+      : tr("麦克风未连接", "Microphone disconnected");
 
   if (editorSeed) {
     return (
@@ -416,11 +462,11 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark"><AudioLines size={22} /></div>
-          <div><strong>SingRight</strong><span>准唱</span></div>
+          <div><strong>SingRight</strong><span>{tr("准唱", "Pitch Trainer")}</span></div>
         </div>
 
         <div className="sidebar-section">
-          <div className="section-kicker"><span>练习曲目</span><span>{scores.length}</span></div>
+          <div className="section-kicker"><span>{tr("练习曲目", "Practice scores")}</span><span>{scores.length}</span></div>
           <div className="song-list">
             {scores.map((score, index) => {
               const selected = score.metadata.id === selectedId;
@@ -439,8 +485,10 @@ function App() {
                 >
                   <span className="song-number">{String(index + 1).padStart(2, "0")}</span>
                   <span className="song-copy">
-                    <strong>{score.metadata.title}</strong>
-                    <small>{score.notes.length ? `${score.notes.length} 个音 · ${score.tempo.bpm} BPM` : "等待导入曲谱"}</small>
+                    <strong>{scoreDisplayText(score, locale).title}</strong>
+                    <small>{score.notes.length
+                      ? tr(`${score.notes.length} 个音 · ${score.tempo.bpm} BPM`, `${score.notes.length} notes · ${score.tempo.bpm} BPM`)
+                      : tr("等待导入曲谱", "Waiting for a score")}</small>
                   </span>
                   {selected && <Volume2 size={16} />}
                 </button>
@@ -448,11 +496,11 @@ function App() {
             })}
           </div>
           <button className="import-button" onClick={() => scoreInputRef.current?.click()}>
-            <FileUp size={17} /> 导入曲谱
+            <FileUp size={17} /> {tr("导入曲谱", "Import score")}
           </button>
-          <button className="composer-launch" onClick={() => setEditorSeed(createEmptyScore())}>
+          <button className="composer-launch" onClick={() => setEditorSeed(createEmptyScore(locale))}>
             <SquarePen size={17} />
-            <span><strong>新建五线谱</strong><small>点谱 · 试听 · 音频对齐</small></span>
+            <span><strong>{tr("新建曲谱", "New score")}</strong><small>{tr("五线谱 / 简谱 · 试听 · 音频对齐", "Staff / numbered · playback · audio alignment")}</small></span>
           </button>
           <input
             ref={scoreInputRef}
@@ -466,26 +514,26 @@ function App() {
         <div className="sidebar-spacer" />
         <div className="privacy-note">
           <Headphones size={18} />
-          <div><strong>音频只在本机处理</strong><span>麦克风与录音不会上传</span></div>
+          <div><strong>{tr("音频只在本机处理", "Audio stays on this device")}</strong><span>{tr("麦克风与录音不会上传", "Microphone audio is never uploaded")}</span></div>
         </div>
         <button className="settings-button" onClick={() => setShowSettings(true)}>
-          <Settings2 size={18} /> 偏好设置
+          <Settings2 size={18} /> {tr("偏好设置", "Preferences")}
         </button>
       </aside>
 
       <main className="workspace">
         <header className="topbar">
           <div>
-            <div className="eyebrow"><span className="live-dot" /> PITCH LAB / 音准练习室</div>
-            <h1>{selectedScore.metadata.title}</h1>
-            <p>{selectedScore.metadata.description || "导入你的曲谱，开始更精确的歌唱练习。"}</p>
+            <div className="eyebrow"><span className="live-dot" /> {tr("PITCH LAB / 音准练习室", "PITCH LAB / SINGING PRACTICE")}</div>
+            <h1>{selectedDisplay.title}</h1>
+            <p>{selectedDisplay.description || tr("导入你的曲谱，开始更精确的歌唱练习。", "Import a score and start more precise singing practice.")}</p>
           </div>
           <button
             className={`mic-status ${captureStatus === "listening" ? "connected" : ""}`}
             onClick={() => captureStatus === "listening" ? void stopMicrophone() : void ensureMicrophone()}
           >
             {captureStatus === "listening" ? <Mic size={18} /> : <MicOff size={18} />}
-            <span><strong>{statusLabel}</strong><small>{captureStatus === "listening" ? "点击断开" : "点击连接输入设备"}</small></span>
+            <span><strong>{statusLabel}</strong><small>{captureStatus === "listening" ? tr("点击断开", "Click to disconnect") : tr("点击连接输入设备", "Click to connect input")}</small></span>
           </button>
         </header>
 
@@ -495,29 +543,36 @@ function App() {
 
         <section className="mode-row">
           <div className="mode-tabs">
-            {(Object.keys(MODE_COPY) as PracticeMode[]).map((item) => (
+            {(Object.keys(modeCopy) as PracticeMode[]).map((item) => (
               <button className={mode === item ? "active" : ""} key={item} onClick={() => switchMode(item)}>
                 {item === "step" ? <Target size={18} /> : item === "continuous" ? <Activity size={18} /> : <RefreshCcw size={18} />}
-                <span><strong>{MODE_COPY[item].label}</strong><small>{MODE_COPY[item].short}</small></span>
+                <span><strong>{modeCopy[item].label}</strong><small>{modeCopy[item].short}</small></span>
               </button>
             ))}
           </div>
-          <div className="transpose-control" aria-label="移调控制">
-            <span>移调</span>
-            <button onClick={() => setTranspose((value) => Math.max(-12, value - 1))} aria-label="降半音">−</button>
+          <div className="transpose-control" aria-label={tr("移调控制", "Transpose control")}>
+            <span>{tr("移调", "Key")}</span>
+            <button onClick={() => setTranspose((value) => Math.max(-12, value - 1))} aria-label={tr("降半音", "Down one semitone")}>−</button>
             <strong>{transpose > 0 ? `+${transpose}` : transpose}</strong>
-            <button onClick={() => setTranspose((value) => Math.min(12, value + 1))} aria-label="升半音">＋</button>
-            <button className="tonic-button" onClick={captureTonic}><Sparkles size={15} /> 首音定调</button>
+            <button onClick={() => setTranspose((value) => Math.min(12, value + 1))} aria-label={tr("升半音", "Up one semitone")}>＋</button>
+            <button className="tonic-button" onClick={captureTonic}><Sparkles size={15} /> {tr("首音定调", "Set key from first note")}</button>
           </div>
         </section>
+        <div className={`mode-explainer mode-${mode}`}>
+          <span>{mode === "continuous" ? <Activity size={16} /> : mode === "review" ? <RefreshCcw size={16} /> : <Target size={16} />}</span>
+          <div><strong>{modeCopy[mode].label}</strong><small>{modeCopy[mode].detail}</small></div>
+          {mode !== "step" && <i>{mode === "continuous" ? tr("实时显示偏差", "Live cents shown") : tr("演唱时隐藏偏差", "Cents hidden during take")}</i>}
+        </div>
 
         <section className="practice-card">
           <div className="score-head">
             <div>
-              <span className="card-kicker">CURRENT PHRASE</span>
-              <strong>{mode === "step" ? `第 ${Math.min(stepIndex + 1, selectedScore.notes.length || 1)} / ${selectedScore.notes.length || 0} 音` : `${Math.round(playhead)} / ${Math.round(totalDuration)} 秒`}</strong>
+              <span className="card-kicker">{tr("CURRENT PHRASE / 当前片段", "CURRENT PHRASE")}</span>
+              <strong>{mode === "step"
+                ? tr(`第 ${Math.min(stepIndex + 1, selectedScore.notes.length || 1)} / ${selectedScore.notes.length || 0} 音`, `Note ${Math.min(stepIndex + 1, selectedScore.notes.length || 1)} of ${selectedScore.notes.length || 0}`)
+                : tr(`${Math.round(playhead)} / ${Math.round(totalDuration)} 秒`, `${Math.round(playhead)} / ${Math.round(totalDuration)} sec`)}</strong>
             </div>
-            <div className="meter-legend"><span><i className="perfect" /> 准确</span><span><i className="close" /> 接近</span><span><i className="off" /> 偏离</span></div>
+            <div className="meter-legend"><span><i className="perfect" /> {tr("准确", "Accurate")}</span><span><i className="close" /> {tr("接近", "Close")}</span><span><i className="off" /> {tr("偏离", "Off")}</span></div>
           </div>
 
           <ScoreRail
@@ -527,22 +582,27 @@ function App() {
             progress={progress}
           />
 
-          <div className="pitch-panel">
+          {mode === "review" && active ? (
+            <div className="review-focus-panel">
+              <div className="focus-pulse"><Mic size={25} /></div>
+              <div><span>{tr("专注演唱中", "FOCUS TAKE IN PROGRESS")}</span><strong>{tr("先唱完整首，再集中看结果", "Finish the take first; review every note afterward")}</strong><small>{tr("当前录音与音高轨迹只保存在本机。实时 cents 已隐藏，避免边唱边追指针。", "Recording and pitch tracking stay on this device. Live cents are hidden so you can stay musical.")}</small></div>
+            </div>
+          ) : <div className="pitch-panel">
             <div className="pitch-readout target-readout">
-              <span>目标音</span>
+              <span>{tr("目标音", "Target note")}</span>
               <strong>{targetMidi === null ? "—" : midiToNoteName(targetMidi)}</strong>
-              <small>{targetFrequency ? `${targetFrequency.toFixed(1)} Hz` : "休止 / 暂无音符"}</small>
+              <small>{targetFrequency ? `${targetFrequency.toFixed(1)} Hz` : tr("休止 / 暂无音符", "Rest / no note")}</small>
             </div>
             <div className="tuner">
               <div className="tuner-value">
-                {liveCents === null ? <span className="waiting">等待声音</span> : (
+                {liveCents === null ? <span className="waiting">{tr("等待声音", "Waiting for voice")}</span> : (
                   <>
                     <strong className={isInTune ? "in-tune" : ""}>{signed(liveCents)}</strong>
                     <span>cents</span>
                   </>
                 )}
               </div>
-              <div className="gauge-labels"><span>偏低</span><span>准</span><span>偏高</span></div>
+              <div className="gauge-labels"><span>{tr("偏低", "Flat")}</span><span>{tr("准", "In tune")}</span><span>{tr("偏高", "Sharp")}</span></div>
               <div className="gauge-track">
                 <div className="gauge-zone" />
                 <div className={`gauge-needle ${isInTune ? "in-tune" : ""}`} style={{ left: `${gaugePosition}%` }} />
@@ -550,15 +610,15 @@ function App() {
               <div className="gauge-ticks"><span>−100</span><span>−50</span><span>0</span><span>+50</span><span>+100</span></div>
             </div>
             <div className="pitch-readout live-readout">
-              <span>实时音高</span>
+              <span>{tr("实时音高", "Live pitch")}</span>
               <strong>{reading?.noteName ?? "—"}</strong>
-              <small>{reading ? `${reading.frequency.toFixed(1)} Hz · ${Math.round(reading.confidence * 100)}%` : "请唱出一个稳定的音"}</small>
+              <small>{reading ? `${reading.frequency.toFixed(1)} Hz · ${Math.round(reading.confidence * 100)}%` : tr("请唱出一个稳定的音", "Sing a steady note")}</small>
             </div>
-          </div>
+          </div>}
 
           {mode === "step" && active && (
             <div className="hold-progress">
-              <span>稳定保持</span>
+              <span>{tr("稳定保持", "Steady hold")}</span>
               <div><i style={{ width: `${Math.min(100, stableMs / holdGoalMs * 100)}%` }} /></div>
               <strong>{Math.round(Math.max(0, holdGoalMs - stableMs) / 100) / 10}s</strong>
             </div>
@@ -574,7 +634,9 @@ function App() {
               }}
             ><ChevronLeft /></button>
             <button className={`primary-transport ${active ? "stop" : ""}`} onClick={() => active ? stopPractice(false) : void startPractice()}>
-              {active ? <><Pause fill="currentColor" /> 结束并复盘</> : <><Play fill="currentColor" /> {mode === "review" ? "开始录制整曲" : "开始练习"}</>}
+              {active
+                ? <><Pause fill="currentColor" /> {tr("结束并复盘", "Stop and review")}</>
+                : <><Play fill="currentColor" /> {mode === "review" ? tr("开始录制整曲", "Record full take") : tr("开始练习", "Start practice")}</>}
             </button>
             <button
               className="skip-button"
@@ -591,29 +653,38 @@ function App() {
           <div className="upload-card">
             <div className="mini-icon"><FileAudio size={20} /></div>
             <div className="upload-copy">
-              <strong>上传录音，离线纠错</strong>
-              <span>支持 WAV、MP3、M4A、WebM 等系统可解码格式</span>
+              <strong>{tr("上传录音，离线纠错", "Analyze a recording offline")}</strong>
+              <span>{tr("支持 WAV、MP3、M4A、WebM 等系统可解码格式", "Supports WAV, MP3, M4A, WebM, and other decodable audio")}</span>
             </div>
             <button onClick={() => audioInputRef.current?.click()} disabled={analysisProgress !== null}>
-              {analysisProgress !== null ? `分析中 ${Math.round(analysisProgress * 100)}%` : <><Upload size={16} /> 选择录音</>}
+              {analysisProgress !== null
+                ? tr(`分析中 ${Math.round(analysisProgress * 100)}%`, `Analyzing ${Math.round(analysisProgress * 100)}%`)
+                : <><Upload size={16} /> {tr("选择录音", "Choose recording")}</>}
             </button>
             <input ref={audioInputRef} type="file" accept="audio/*" hidden onChange={(event) => void handleAudioImport(event.target.files?.[0])} />
             {analysisProgress !== null && <div className="analysis-bar"><i style={{ width: `${analysisProgress * 100}%` }} /></div>}
           </div>
           <div className="quick-card">
             <SlidersHorizontal size={20} />
-            <div><span>当前标准</span><strong>A4 = {referenceHz} Hz · ±{toleranceCents} cents</strong></div>
-            <button onClick={() => setShowSettings(true)}>调整</button>
+            <div><span>{tr("当前标准", "Current standard")}</span><strong>A4 = {referenceHz} Hz · ±{toleranceCents} cents</strong></div>
+            <button onClick={() => setShowSettings(true)}>{tr("调整", "Adjust")}</button>
           </div>
           <div className="quick-card">
             <ArrowDownToLine size={20} />
-            <div><span>曲谱模板</span><strong>.singright.json v1</strong></div>
-            <button onClick={downloadTemplate}>下载</button>
+            <div><span>{tr("曲谱模板", "Score template")}</span><strong>.singright.json v1</strong></div>
+            <button onClick={downloadTemplate}>{tr("下载", "Download")}</button>
           </div>
           <div className="quick-card composer-quick-card">
             <SquarePen size={20} />
-            <div><span>五线谱工作台</span><strong>编辑当前曲谱并试听</strong></div>
-            <button onClick={() => setEditorSeed(selectedScore)}>打开</button>
+            <div><span>{tr("曲谱工作台", "Score workspace")}</span><strong>{tr("五线谱 / 简谱编辑与试听", "Staff / numbered editing and playback")}</strong></div>
+            <button onClick={() => setEditorSeed({
+              ...selectedScore,
+              metadata: {
+                ...selectedScore.metadata,
+                title: selectedDisplay.title,
+                description: selectedDisplay.description,
+              },
+            })}>{tr("打开", "Open")}</button>
           </div>
         </section>
 
@@ -631,25 +702,60 @@ function App() {
       {showSettings && (
         <div className="settings-backdrop" onMouseDown={(event) => event.currentTarget === event.target && setShowSettings(false)}>
           <aside className="settings-drawer">
-            <div className="drawer-head"><div><span>练习偏好</span><strong>校准你的标准</strong></div><button onClick={() => setShowSettings(false)}><X /></button></div>
+            <div className="drawer-head"><div><span>{tr("练习偏好", "PRACTICE PREFERENCES")}</span><strong>{tr("校准你的标准", "Tune your standard")}</strong></div><button onClick={() => setShowSettings(false)} aria-label={tr("关闭", "Close")}><X /></button></div>
             <label>
-              <div><span>A4 参考频率</span><strong>{referenceHz} Hz</strong></div>
+              <div><span>{tr("界面语言", "Interface language")}</span><strong>{locale === "zh-CN" ? "简体中文" : "English"}</strong></div>
+              <select className="language-select" value={locale} onChange={(event) => setLocale(event.target.value as "zh-CN" | "en")}>
+                <option value="zh-CN">简体中文</option>
+                <option value="en">English</option>
+              </select>
+              <small>{tr("首次启动会采用安装包语言或系统语言，你可以随时在这里切换。", "The first launch uses the installer or system language. You can change it here anytime.")}</small>
+            </label>
+            <label>
+              <div><span>{tr("A4 参考频率", "A4 reference")}</span><strong>{referenceHz} Hz</strong></div>
               <input type="range" min="430" max="450" value={referenceHz} onChange={(event) => setReferenceHz(Number(event.target.value))} />
-              <small>现代音乐通常使用 440 Hz；部分乐团或老录音会略有不同。</small>
+              <small>{tr("现代音乐通常使用 440 Hz；部分乐团或老录音会略有不同。", "Modern music usually uses 440 Hz; ensembles and older recordings may differ.")}</small>
             </label>
             <label>
-              <div><span>准确容差</span><strong>±{toleranceCents} cents</strong></div>
-              <input type="range" min="15" max="50" step="5" value={toleranceCents} onChange={(event) => setToleranceCents(Number(event.target.value))} />
-              <small>100 cents 等于一个半音。初学建议 35，严格训练建议 20。</small>
+              <div><span>{tr("音准容差", "Pitch tolerance")}</span><strong>±{toleranceCents} cents</strong></div>
+              <div className="tolerance-presets">
+                {([
+                  ["relaxed", tr("宽松", "Relaxed")],
+                  ["standard", tr("标准", "Standard")],
+                  ["strict", tr("严格", "Strict")],
+                  ["custom", tr("自定义", "Custom")],
+                ] as Array<[TolerancePreset, string]>).map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={tolerancePreset === value ? "active" : ""}
+                    onClick={() => {
+                      setTolerancePreset(value);
+                      if (value !== "custom") setToleranceCents(TOLERANCE_VALUES[value]);
+                    }}
+                  >{label}{value !== "custom" && <small>±{TOLERANCE_VALUES[value]}</small>}</button>
+                ))}
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                step="1"
+                value={toleranceCents}
+                onChange={(event) => {
+                  setTolerancePreset("custom");
+                  setToleranceCents(Number(event.target.value));
+                }}
+              />
+              <small>{tr("100 cents 等于一个半音。宽松模式适合初学，自定义可在 ±10–100 cents 间精确调整。", "100 cents equals one semitone. Relaxed suits beginners; Custom allows any value from ±10–100 cents.")}</small>
             </label>
             <label>
-              <div><span>逐音稳定时长</span><strong>{(holdGoalMs / 1000).toFixed(2)} 秒</strong></div>
+              <div><span>{tr("逐音稳定时长", "Steady-hold duration")}</span><strong>{(holdGoalMs / 1000).toFixed(2)} {tr("秒", "sec")}</strong></div>
               <input type="range" min="350" max="1200" step="50" value={holdGoalMs} onChange={(event) => setHoldGoalMs(Number(event.target.value))} />
-              <small>在容差范围内持续达到此时长，才算通过当前音。</small>
+              <small>{tr("在容差范围内持续达到此时长，才算通过当前音。", "A note passes only after staying within tolerance for this duration.")}</small>
             </label>
             <div className="settings-summary">
               <Gauge size={20} />
-              <span>这些设置同时作用于实时练习和录音分析。</span>
+              <span>{tr("这些设置同时作用于实时练习和录音分析。", "These settings apply to live practice and recording analysis.")}</span>
             </div>
           </aside>
         </div>
@@ -671,11 +777,13 @@ function ScoreRail({
   transpose: number;
   progress: number;
 }) {
+  const { locale } = useI18n();
+  const tr = (zh: string, en: string) => localize(locale, zh, en);
   if (score.notes.length === 0) {
     return (
       <div className="empty-score">
         <Music2 size={28} />
-        <div><strong>这首曲目还没有音符</strong><span>下载空白模板填写，或直接导入你的 `.singright.json` 曲谱。</span></div>
+        <div><strong>{tr("这首曲目还没有音符", "This score has no notes yet")}</strong><span>{tr("下载空白模板填写，或在曲谱工作台直接打谱。", "Download the blank template or create it in the score workspace.")}</span></div>
       </div>
     );
   }
@@ -699,8 +807,8 @@ function ScoreRail({
               key={note.id}
               style={{ left: `${left}%`, width: `${width}%`, bottom: `${bottom}%` }}
             >
-              <span>{note.midi === null ? "休" : note.numeral || numeralForMidi(note.midi + transpose, score.tuning.tonicMidi + transpose)}</span>
-              <small>{note.lyric || "啊"}</small>
+              <span>{note.midi === null ? "0" : note.numeral || numeralForMidi(note.midi + transpose, score.tuning.tonicMidi + transpose)}</span>
+              <small>{note.lyric || (note.midi === null ? "" : midiToNoteName(note.midi + transpose))}</small>
             </div>
           );
         })}
@@ -723,31 +831,33 @@ function ReviewPanel({
   recordingName: string;
   transpose: number;
 }) {
+  const { locale } = useI18n();
+  const tr = (zh: string, en: string) => localize(locale, zh, en);
   const retryNotes = result?.noteResults.filter((item) => item.verdict === "retry") ?? [];
   return (
     <section className="review-card">
       <div className="review-head">
-        <div><span className="card-kicker">TAKE REVIEW</span><h2>本次演唱复盘</h2><p>{result?.sourceName || "刚刚录制的演唱"}</p></div>
+        <div><span className="card-kicker">TAKE REVIEW</span><h2>{tr("本次演唱复盘", "Take review")}</h2><p>{result?.sourceName || tr("刚刚录制的演唱", "Your latest recording")}</p></div>
         {result && (
           <div className="score-ring" style={{ "--score": `${result.score * 3.6}deg` } as React.CSSProperties}>
-            <div><strong>{result.score}</strong><span>音准分</span></div>
+            <div><strong>{result.score}</strong><span>{tr("音准分", "Pitch score")}</span></div>
           </div>
         )}
       </div>
       {result && (
         <>
           <div className="review-stats">
-            <div><span>有效覆盖</span><strong>{result.coverage}%</strong></div>
-            <div><span>需要重练</span><strong>{retryNotes.length} 个音</strong></div>
-            <div><span>平均结果</span><strong>{result.score >= 85 ? "稳定" : result.score >= 60 ? "接近" : "继续练习"}</strong></div>
+            <div><span>{tr("有效覆盖", "Coverage")}</span><strong>{result.coverage}%</strong></div>
+            <div><span>{tr("需要重练", "Retry")}</span><strong>{tr(`${retryNotes.length} 个音`, `${retryNotes.length} notes`)}</strong></div>
+            <div><span>{tr("平均结果", "Overall")}</span><strong>{result.score >= 85 ? tr("稳定", "Steady") : result.score >= 60 ? tr("接近", "Close") : tr("继续练习", "Keep practicing")}</strong></div>
           </div>
           <div className="result-notes">
             {result.noteResults.map((item) => (
               <div className={`result-note ${item.verdict}`} key={item.note.id}>
-                <span>{item.note.numeral || (item.targetMidi === null ? "休" : numeralForMidi(item.targetMidi, score.tuning.tonicMidi + transpose))}</span>
-                <strong>{item.targetMidi === null ? "休止" : midiToNoteName(item.targetMidi)}</strong>
-                <small>{item.meanCents === null ? "未检测" : `${signed(item.meanCents)} cents`}</small>
-                <i>{item.verdict === "excellent" ? "准" : item.verdict === "good" ? "近" : item.verdict === "rest" ? "休" : "练"}</i>
+                <span>{item.note.numeral || (item.targetMidi === null ? "0" : numeralForMidi(item.targetMidi, score.tuning.tonicMidi + transpose))}</span>
+                <strong>{item.targetMidi === null ? tr("休止", "Rest") : midiToNoteName(item.targetMidi)}</strong>
+                <small>{item.meanCents === null ? tr("未检测", "Not detected") : `${signed(item.meanCents)} cents`}</small>
+                <i>{item.verdict === "excellent" ? "✓" : item.verdict === "good" ? "≈" : item.verdict === "rest" ? "0" : "↻"}</i>
               </div>
             ))}
           </div>
@@ -755,9 +865,9 @@ function ReviewPanel({
       )}
       {recordingUrl && (
         <div className="recording-row">
-          <div><CircleStop size={18} /><span><strong>本次录音</strong><small>保存在当前设备，可播放或下载</small></span></div>
+          <div><CircleStop size={18} /><span><strong>{tr("本次录音", "This recording")}</strong><small>{tr("保存在当前设备，可播放或下载", "Stored on this device; play or download it")}</small></span></div>
           <audio controls src={recordingUrl} />
-          <a href={recordingUrl} download={recordingName}><ArrowDownToLine size={16} /> 保存录音</a>
+          <a href={recordingUrl} download={recordingName}><ArrowDownToLine size={16} /> {tr("保存录音", "Save recording")}</a>
         </div>
       )}
     </section>

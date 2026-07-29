@@ -23,7 +23,7 @@ export default function DownloadPage() {
       <header className="download-hero wrap">
         <div className="hero-kicker"><i /> 免费 · 开源 · 本机处理</div>
         <h1>选择你的系统，<br /><em>开始练准。</em></h1>
-        <p>不需要账户。既可以打开示例音阶练唱，也可以在五线谱工作台里从零制作自己的曲谱。</p>
+        <p>不需要账户。既可以打开示例音阶练唱，也可以在五线谱 / 简谱工作台里从零制作自己的曲谱；中文与 English 可随时切换。</p>
       </header>
       <DownloadsClient />
       <section className="install-notes wrap">

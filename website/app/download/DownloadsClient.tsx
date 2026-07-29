@@ -47,6 +47,15 @@ const platforms = [
   },
 ];
 
+type DownloadLocale = "zh-CN" | "en";
+
+function matchesLocale(name: string, locale: DownloadLocale): boolean {
+  const normalized = name.toLowerCase();
+  return locale === "zh-CN"
+    ? normalized.includes("zh-cn")
+    : /(^|[-_.])en([-. _]|$)/.test(normalized);
+}
+
 export default function DownloadsClient() {
   const [release, setRelease] = useState<LatestRelease | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -75,21 +84,32 @@ export default function DownloadsClient() {
       </div>
       <div className="platform-cards">
         {platforms.map((platform) => {
-          const asset = release?.assets.find((candidate) => platform.match(candidate.name));
+          const zhAsset = release?.assets.find((candidate) => platform.match(candidate.name) && matchesLocale(candidate.name, "zh-CN"));
+          const enAsset = release?.assets.find((candidate) => platform.match(candidate.name) && matchesLocale(candidate.name, "en"));
+          const fallbackAsset = release?.assets.find((candidate) => platform.match(candidate.name));
+          const ready = Boolean(zhAsset || enAsset || fallbackAsset);
           return (
             <article key={platform.id}>
               <div className={`platform-icon ${platform.id}`}>{platform.icon}</div>
               <span>{platform.detail}</span>
               <h2>{platform.name}</h2>
               <p>{platform.minimum}<br />安装包格式 {platform.format}</p>
-              <a href={asset?.browser_download_url ?? RELEASES_URL}>
-                {asset ? `下载 ${platform.name}` : "前往 Releases"}
-                <i>↓</i>
-              </a>
-              <small>{asset ? `${asset.name} · ${(asset.size / 1024 / 1024).toFixed(1)} MB` : "构建完成后自动出现下载包"}</small>
+              <div className="language-downloads">
+                <a href={(zhAsset ?? fallbackAsset)?.browser_download_url ?? RELEASES_URL}>
+                  <span><b>中文版</b><small>{zhAsset ? `${(zhAsset.size / 1024 / 1024).toFixed(1)} MB` : "中文界面"}</small></span><i>↓</i>
+                </a>
+                <a href={(enAsset ?? fallbackAsset)?.browser_download_url ?? RELEASES_URL}>
+                  <span><b>English</b><small>{enAsset ? `${(enAsset.size / 1024 / 1024).toFixed(1)} MB` : "English UI"}</small></span><i>↓</i>
+                </a>
+              </div>
+              <small>{ready ? "应用内可随时切换中文 / English" : "构建完成后自动出现下载包"}</small>
             </article>
           );
         })}
+      </div>
+      <div className="installer-language-note">
+        <strong>双语安装与界面</strong>
+        <span>Windows 安装器会按系统语言自动选择中文或 English，也可以在安装开始时手动切换。macOS 与 Linux 请先选偏好的语言包，进入应用后仍可随时改语言。</span>
       </div>
       <div className="source-download">
         <span>想自己构建或参与开发？</span>

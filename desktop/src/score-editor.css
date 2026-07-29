@@ -49,6 +49,10 @@
 .document-status strong { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .document-status span { color: #8ea095; font-size: 8px; }
 .composer-actions { gap: 6px; }
+.composer-language { height: 36px; padding: 0 8px; border: 1px solid #3c4c43; border-radius: 9px; display: flex; align-items: center; gap: 4px; color: #aebdb4; background: #213128; }
+.composer-language svg { width: 14px; }
+.composer-language select { width: 48px; border: 0; outline: 0; color: #e4ebe7; background: transparent; font-size: 8px; }
+.composer-language option { color: #1d2b23; background: #fff; }
 .icon-button,
 .text-button,
 .save-button,
@@ -125,6 +129,11 @@
 .duration-grid button span { font-size: 7px; }
 .duration-grid button kbd { position: absolute; right: 3px; top: 3px; color: #a3aaa6; font: 6px "DM Mono", monospace; }
 .duration-grid button.active { color: #fff; border-color: var(--composer-green); background: var(--composer-green); }
+.numeral-input-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.numeral-input-grid button { height: 47px; padding: 3px; border: 1px solid #d8d5cd; border-radius: 8px; display: grid; place-items: center; align-content: center; gap: 1px; color: #264332; background: #fffefa; }
+.numeral-input-grid button strong { font: 700 16px "DM Mono", monospace; }
+.numeral-input-grid button small { color: #8d9690; font: 500 6px "DM Mono", monospace; }
+.numeral-input-grid .numeral-rest { color: #955d36; border-color: #e3c4a7; background: #fff1df; }
 .dot-toggle { width: 100%; height: 34px; margin-top: 7px; padding: 0 9px; border: 1px solid #d9d6ce; border-radius: 8px; display: flex; align-items: center; gap: 7px; color: #657169; background: #fbfaf6; font-size: 9px; }
 .dot-toggle i { width: 7px; height: 7px; border-radius: 50%; background: #8c9790; }
 .dot-toggle span { margin-left: auto; color: #99a09c; font-size: 7px; }
@@ -199,6 +208,9 @@
 .zoom-control button { width: 26px; height: 26px; padding: 0; border: 1px solid #d6d3cb; border-radius: 7px; display: grid; place-items: center; background: #fff; }
 .zoom-control button svg { width: 12px; }
 .zoom-control strong { width: 35px; text-align: center; font: 500 8px "DM Mono"; }
+.notation-view-tabs { padding: 3px; display: flex; gap: 2px; border-radius: 8px; background: #e4e2dc; }
+.notation-view-tabs button { height: 25px; padding: 0 8px; border: 0; border-radius: 6px; color: #7a857e; background: transparent; font-size: 7px; white-space: nowrap; }
+.notation-view-tabs button.active { color: #294536; background: #fffefa; box-shadow: 0 1px 5px rgba(33, 45, 38, .1); }
 .paper-title { min-height: 84px; padding: 20px 42px 9px; display: flex; align-items: flex-start; justify-content: center; position: relative; }
 .paper-title div { text-align: center; }
 .paper-title h1 { margin: 0; font: 700 22px "Outfit", "Noto Sans SC", sans-serif; }
@@ -233,6 +245,25 @@
 .edit-cursor line { stroke: #eca153; stroke-width: 1.5; stroke-dasharray: 3 3; }
 .edit-cursor path { fill: #eca153; }
 .composer-playhead { stroke: #3f895e; stroke-width: 2; filter: drop-shadow(0 0 2px rgba(63, 137, 94, .25)); }
+.numbered-scroll { max-height: 430px; overflow: auto; padding: 13px 28px 22px; border-top: 1px solid #eceae4; background: #fffefa; }
+.numbered-key-line { min-height: 34px; display: flex; align-items: center; gap: 18px; color: #66736b; font: 500 8px "DM Mono", monospace; }
+.numbered-key-line strong { color: #263d30; font-size: 10px; }
+.numbered-measures { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); border-top: 1px solid #59605c; border-left: 1px solid #59605c; }
+.numbered-measure { position: relative; min-height: 104px; overflow: hidden; border-right: 1px solid #59605c; border-bottom: 1px solid #59605c; cursor: text; }
+.numbered-measure.cursor-here { background: #fffaf1; }
+.numbered-measure-label { position: absolute; left: 5px; top: 4px; color: #a6aaa7; font: 500 6px "DM Mono", monospace; }
+.numbered-beat-guide { position: absolute; top: 20px; bottom: 13px; width: 1px; border-left: 1px dashed #ece9e2; }
+.numbered-note { position: absolute; top: 24px; min-width: 27px; min-height: 69px; padding: 6px 2px; border: 0; display: grid; justify-items: center; align-content: start; gap: 2px; color: #26362d; background: transparent; }
+.numbered-note:hover { background: #f2efe8; }
+.numbered-note.selected { color: #c96f25; background: #fff0dc; box-shadow: inset 0 0 0 1px #efb270; }
+.numbered-note strong { min-height: 23px; font: 700 21px/23px "DM Mono", monospace; }
+.numbered-note small { max-width: 100%; margin-top: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6e7972; font-size: 8px; }
+.duration-underlines { width: 17px; height: 4px; border-top: 1.5px solid currentColor; }
+.duration-underlines.lines-2 { border-bottom: 1.5px solid currentColor; }
+.duration-dashes { height: 6px; color: #6c776f; font: 600 8px "DM Mono", monospace; letter-spacing: 2px; }
+.numbered-cursor, .numbered-playhead { position: absolute; top: 16px; bottom: 8px; width: 1.5px; pointer-events: none; }
+.numbered-cursor { z-index: 4; border-left: 1.5px dashed #e99a4b; }
+.numbered-playhead { z-index: 5; background: #3f895e; box-shadow: 0 0 4px rgba(63, 137, 94, .25); }
 .paper-footer { min-height: 34px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; color: #979d99; border-top: 1px solid #eceae4; background: #fbfaf6; font-size: 7px; }
 .paper-footer strong { color: #657269; font: 500 7px "DM Mono"; }
 

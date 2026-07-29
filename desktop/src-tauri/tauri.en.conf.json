@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SingRight-en",
+  "identifier": "io.github.polynomial1027.singright.en",
+  "app": {
+    "windows": [
+      {
+        "title": "SingRight English",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 1040,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "backgroundColor": "#F4F1EA"
+      }
+    ]
+  },
+  "bundle": {
+    "shortDescription": "Sing every note in tune",
+    "longDescription": "Cross-platform staff and numbered score editor, reference-audio editor, and singing pitch trainer.",
+    "macOS": {
+      "infoPlist": "Info.en.plist"
+    }
+  }
+}

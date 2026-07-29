@@ -202,6 +202,14 @@ footer > div { min-height:112px; display:grid; grid-template-columns:1fr 1fr 1fr
 .platform-cards article > span { font:500 8px var(--font-geist-mono); color:#859189; letter-spacing:.1em; }.platform-cards h2 { font:700 31px var(--font-outfit); margin:5px 0 10px; }.platform-cards p { color:#7d8982; font-size:10px; line-height:1.8; margin:0; }
 .platform-cards article > a { margin-top:auto; background:var(--green-dark); color:#fff; border-radius:10px; padding:12px 14px; display:flex; justify-content:space-between; font-size:10px; font-weight:600; }.platform-cards article > a i { color:var(--orange);font-style:normal;font-size:15px; }.platform-cards article > small { margin-top:9px; color:#929c96; font-size:7px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .source-download { margin-top:14px; border:1px dashed #cac7bd; border-radius:13px; padding:15px 18px; display:flex; justify-content:space-between; font-size:9px; color:#738078; }.source-download a { color:#263b30;text-decoration:underline;text-underline-offset:3px; }
+.language-downloads { width:100%; display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.language-downloads > a { min-height:54px; padding:10px 11px !important; display:flex !important; align-items:center; justify-content:space-between; text-align:left; }
+.language-downloads > a span { display:grid; gap:2px; }
+.language-downloads > a b { font-size:9px; }
+.language-downloads > a small { color:#c9d9cf !important; font-size:7px !important; }
+.installer-language-note { margin-top:14px; padding:17px 20px; display:flex; align-items:center; gap:18px; border:1px solid #d8d2c8; border-radius:13px; color:#68766e; background:#ece9e1; }
+.installer-language-note strong { flex:0 0 auto; color:#2d4638; font-size:10px; }
+.installer-language-note span { font-size:9px; line-height:1.65; }
 .install-notes { border-top:1px solid #d7d3c9; padding:95px 0 120px; display:grid; grid-template-columns:1fr 1.3fr; gap:100px; }.install-notes > div > span { font:500 8px var(--font-geist-mono); color:#7a877f; letter-spacing:.14em; }.install-notes h2 { font:700 39px var(--font-outfit),var(--font-noto); margin:11px 0; }.install-notes p { color:#758179; font-size:10px; line-height:1.9; }
 .install-notes ol { margin:0;padding:0;list-style:none;display:grid; }.install-notes li { display:flex;gap:17px;padding:18px 0;border-bottom:1px solid #d8d4ca; }.install-notes li i { font:500 9px var(--font-geist-mono);font-style:normal;color:#d48d49; }.install-notes li span { display:grid;gap:3px; }.install-notes strong { font-size:11px; }.install-notes small { font-size:8px;color:#859189; }
 

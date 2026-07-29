@@ -45,6 +45,13 @@
     "macOS": {
       "infoPlist": "Info.plist",
       "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true,
+        "installMode": "currentUser"
+      }
     }
   }
 }

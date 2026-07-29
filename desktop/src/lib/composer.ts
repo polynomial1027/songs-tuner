@@ -33,7 +33,7 @@ const NATURAL_PITCH_CLASSES = [0, 2, 4, 5, 7, 9, 11];
 const SHARP_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
 const FLAT_NAMES = ["C", "D♭", "D", "E♭", "E", "F", "G♭", "G", "A♭", "A", "B♭", "B"];
 
-export function createEmptyScore(): PitchScore {
+export function createEmptyScore(locale: "zh-CN" | "en" = "zh-CN"): PitchScore {
   const stamp = Date.now();
   return {
     $schema: "https://raw.githubusercontent.com/polynomial1027/songs-tuner/main/schema/singright-score.schema.json",
@@ -41,9 +41,9 @@ export function createEmptyScore(): PitchScore {
     version: 1,
     metadata: {
       id: `score-${stamp}`,
-      title: "未命名曲谱",
+      title: locale === "zh-CN" ? "未命名曲谱" : "Untitled Score",
       artist: "",
-      description: "使用 SingRight 五线谱编辑器创作",
+      description: locale === "zh-CN" ? "使用 SingRight 曲谱编辑器创作" : "Created with the SingRight score editor",
     },
     tempo: { bpm: 88 },
     timeSignature: { beats: 4, beatUnit: 4 },

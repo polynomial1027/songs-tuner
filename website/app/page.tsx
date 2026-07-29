@@ -42,7 +42,7 @@ export default function Home() {
             <div className="score-lines"><i /><i /><i /><i /><i /></div>
             <div className="score-blocks">
               {["1", "2", "3", "4", "5", "6", "7", "1·"].map((note, index) => (
-                <span key={note + index} className={index === 3 ? "now" : index < 3 ? "done" : ""} style={{ bottom: `${20 + index * 6}%` }}>{note}<small>{["哆", "来", "咪", "发", "嗦", "啦", "西", "哆"][index]}</small></span>
+                <span key={note + index} className={index === 3 ? "now" : index < 3 ? "done" : ""} style={{ bottom: `${20 + index * 6}%` }}>{note}<small>{["C", "D", "E", "F", "G", "A", "B", "C"][index]}</small></span>
               ))}
               <strong />
             </div>
@@ -73,7 +73,7 @@ export default function Home() {
           <div className="composer-copy">
             <span>WRITE IT. HEAR IT. SING IT. / 从打谱到练唱</span>
             <h2>不用写 JSON，<br />直接在谱面上创作。</h2>
-            <p>点一下谱线就能输入音符，歌词、拍点、时值和唱名都在同一个工作台里完成。保存后立刻进入音准练习，不需要转换工具。</p>
+            <p>点一下谱线就能输入音符，歌词、拍点、时值和简谱音级都在同一个工作台里完成。保存后立刻进入音准练习，不需要转换工具。</p>
             <div className="composer-features">
               <article><b>01</b><span><strong>点谱与键盘录入</strong><small>鼠标、屏幕钢琴或 A–G 快捷键</small></span></article>
               <article><b>02</b><span><strong>完整记谱属性</strong><small>谱号、调号、拍号、附点、休止和歌词</small></span></article>
@@ -111,7 +111,7 @@ export default function Home() {
                   <b>0.75×</b>
                 </div>
               </div>
-              <aside className="composer-properties"><small>属性检查器</small><strong>当前音符</strong><div className="property-note"><b>♩</b><span>G4<small>四分音符 · 第 3 拍</small></span></div><label>歌词<input value="音" readOnly /></label><label>唱名<input value="5" readOnly /></label></aside>
+              <aside className="composer-properties"><small>属性检查器</small><strong>当前音符</strong><div className="property-note"><b>♩</b><span>G4<small>四分音符 · 第 3 拍</small></span></div><label>歌词<input value="音" readOnly /></label><label>简谱音级<input value="5" readOnly /></label></aside>
             </div>
           </div>
         </div>
@@ -153,7 +153,7 @@ export default function Home() {
           <div className="format-copy">
             <span>ONE FORMAT, ANY SONG / 统一曲谱</span>
             <h2>你的歌，<br />用一种格式导入。</h2>
-            <p><code>.singright.json</code> 同时保存音高、拍点、时值、五线谱信息、简谱唱名和歌词。它既可以在内置编辑器里制作，也能作为普通文本严格校验。</p>
+            <p><code>.singright.json</code> 同时保存音高、拍点、时值、五线谱信息、简谱音级和歌词。它既可以在内置编辑器里制作，也能作为普通文本严格校验。</p>
             <ul>
               <li><i>✓</i> MIDI 音高，不被某一种调号绑定</li>
               <li><i>✓</i> 拍数时值，换 BPM 也不会乱</li>
@@ -162,7 +162,7 @@ export default function Home() {
             </ul>
             <div className="format-actions">
               <a href="https://github.com/polynomial1027/songs-tuner/blob/main/docs/SCORE_FORMAT.zh-CN.md" target="_blank" rel="noreferrer">阅读格式说明 ↗</a>
-              <a href="https://raw.githubusercontent.com/polynomial1027/songs-tuner/main/examples/empty-song.singright.json">下载空白模板 ↓</a>
+              <a href={sitePath("empty-song.singright.json")} download>下载空白模板 ↓</a>
             </div>
           </div>
           <div className="code-card">
@@ -201,7 +201,7 @@ export default function Home() {
           <span>YOUR KEY, YOUR RANGE / 你的调</span>
           <h2>不必勉强唱原调。</h2>
           <p>按半音自由升降，或者直接唱出第一个基准音，让 SingRight 自动固定后续所有音。还可在 430–450 Hz 之间调整 A4。</p>
-          <div><i>±12</i><span>半音移调范围</span><i>±15–50</i><span>cents 容差</span></div>
+          <div><i>±12</i><span>半音移调范围</span><i>±10–100</i><span>cents 自定义容差</span></div>
         </div>
       </section>
 

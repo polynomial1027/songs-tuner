@@ -13,13 +13,13 @@
   "tuning": { "referenceHz": 440, "tonicMidi": 60 },
   "notation": { "clef": "treble", "keySignature": 0 },
   "notes": [
-    { "id": "c4", "midi": 60, "beat": 0, "durationBeats": 2, "numeral": "1", "lyric": "哆" },
-    { "id": "d4", "midi": 62, "beat": 2, "durationBeats": 2, "numeral": "2", "lyric": "来" },
-    { "id": "e4", "midi": 64, "beat": 4, "durationBeats": 2, "numeral": "3", "lyric": "咪" },
-    { "id": "f4", "midi": 65, "beat": 6, "durationBeats": 2, "numeral": "4", "lyric": "发" },
-    { "id": "g4", "midi": 67, "beat": 8, "durationBeats": 2, "numeral": "5", "lyric": "嗦" },
-    { "id": "a4", "midi": 69, "beat": 10, "durationBeats": 2, "numeral": "6", "lyric": "啦" },
-    { "id": "b4", "midi": 71, "beat": 12, "durationBeats": 2, "numeral": "7", "lyric": "西" },
-    { "id": "c5", "midi": 72, "beat": 14, "durationBeats": 4, "numeral": "1·", "lyric": "哆" }
+    { "id": "c4", "midi": 60, "beat": 0, "durationBeats": 2, "numeral": "1", "lyric": "C" },
+    { "id": "d4", "midi": 62, "beat": 2, "durationBeats": 2, "numeral": "2", "lyric": "D" },
+    { "id": "e4", "midi": 64, "beat": 4, "durationBeats": 2, "numeral": "3", "lyric": "E" },
+    { "id": "f4", "midi": 65, "beat": 6, "durationBeats": 2, "numeral": "4", "lyric": "F" },
+    { "id": "g4", "midi": 67, "beat": 8, "durationBeats": 2, "numeral": "5", "lyric": "G" },
+    { "id": "a4", "midi": 69, "beat": 10, "durationBeats": 2, "numeral": "6", "lyric": "A" },
+    { "id": "b4", "midi": 71, "beat": 12, "durationBeats": 2, "numeral": "7", "lyric": "B" },
+    { "id": "c5", "midi": 72, "beat": 14, "durationBeats": 4, "numeral": "1·", "lyric": "C" }
   ]
 }

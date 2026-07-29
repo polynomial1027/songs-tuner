@@ -16,15 +16,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS universal
+          - name: macOS universal · 中文
             platform: macos-latest
-            args: "--target universal-apple-darwin --bundles dmg,app"
-          - name: Windows x64
+            locale: zh-CN
+            args: "--target universal-apple-darwin --bundles dmg,app --config src-tauri/tauri.zh-CN.conf.json"
+          - name: macOS universal · English
+            platform: macos-latest
+            locale: en
+            args: "--target universal-apple-darwin --bundles dmg,app --config src-tauri/tauri.en.conf.json"
+          - name: Windows x64 · 中文
             platform: windows-latest
-            args: "--bundles nsis"
-          - name: Linux x64
+            locale: zh-CN
+            args: "--bundles nsis --config src-tauri/tauri.zh-CN.conf.json"
+          - name: Windows x64 · English
+            platform: windows-latest
+            locale: en
+            args: "--bundles nsis --config src-tauri/tauri.en.conf.json"
+          - name: Linux x64 · 中文
             platform: ubuntu-22.04
-            args: "--bundles appimage,deb"
+            locale: zh-CN
+            args: "--bundles appimage,deb --config src-tauri/tauri.zh-CN.conf.json"
+          - name: Linux x64 · English
+            platform: ubuntu-22.04
+            locale: en
+            args: "--bundles appimage,deb --config src-tauri/tauri.en.conf.json"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -64,22 +79,27 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_DEFAULT_LOCALE: ${{ matrix.locale }}
           TAURI_BUNDLE_MACOS_SIGNING_IDENTITY: ${{ matrix.platform == 'macos-latest' && '-' || '' }}
         with:
           projectPath: desktop
           tagName: v__VERSION__
           releaseName: "SingRight 准唱 v__VERSION__"
           releaseBody: |
-            SingRight 准唱 v0.2 新增完整五线谱制谱工作台。
+            SingRight v0.2.0 提供中文和 English 两套安装包，应用内可随时切换语言。Windows 安装器会根据系统语言自动选择，并提供安装语言选择器。
 
             - 实时麦克风音高检测
-            - 逐音校准、连续跟唱、整曲复盘
-            - 五线谱点谱、键盘录入、歌词与完整时值编辑
+            - 宽松、标准、严格与 ±10–100 cents 自定义音准容差
+            - 区分明确的逐音校准、实时连续跟唱、无干扰整曲复盘
+            - 五线谱、简谱与对照视图，支持 0–7 快捷录入
+            - 全软件音名统一采用 C D E F G A B
             - 参考音频波形、裁剪、速度和拍点对齐
             - 合成音试听、节拍器、预备拍和小节循环
             - SingRight JSON、MusicXML 与 MIDI 格式互通
             - 录音上传分析和本地录音保存
             - 移调、首音定调、A4 基准和容差设置
+
+            中文用户请选择文件名含 `zh-CN` 的安装包；English users should choose an asset containing `en`.
 
             本版本尚未进行商业代码签名。首次打开时，系统可能要求你在安全设置中确认。
           releaseDraft: false
