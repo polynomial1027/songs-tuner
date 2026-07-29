@@ -4,6 +4,10 @@ export function midiToFrequency(midi: number, referenceHz = 440): number {
   return referenceHz * Math.pow(2, (midi - 69) / 12);
 }
 
+export function referenceHzForAnchor(frequency: number, targetMidi: number): number {
+  return frequency / Math.pow(2, (targetMidi - 69) / 12);
+}
+
 export function frequencyToMidi(frequency: number, referenceHz = 440): number {
   return 69 + 12 * Math.log2(frequency / referenceHz);
 }

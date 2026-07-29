@@ -31,8 +31,8 @@ import ascendingScale from "./data/ascending-scale.json";
 import emptySong from "./data/empty-song.json";
 import { localize, useI18n } from "./i18n";
 import { createEmptyScore } from "./lib/composer";
-import { downloadBlob } from "./lib/download";
-import { centsBetweenFrequency, clampCents, frequencyToMidi, midiToFrequency, midiToNoteName, numeralForMidi, signed } from "./lib/music";
+import { saveBlob } from "./lib/download";
+import { centsBetweenFrequency, clampCents, frequencyToMidi, midiToFrequency, midiToNoteName, numeralForMidi, referenceHzForAnchor, signed } from "./lib/music";
 import { analyzeAudioFile, detectPitchYin } from "./lib/pitch";
 import { buildSessionResult, noteAtSeconds, parseScoreFile, scoreDurationSeconds, validateScore } from "./lib/score";
 import ScoreEditor from "./ScoreEditor";
@@ -47,6 +47,11 @@ const TOLERANCE_VALUES: Record<Exclude<TolerancePreset, "custom">, number> = {
 };
 
 type CaptureStatus = "idle" | "requesting" | "listening" | "error";
+interface TonicCalibration {
+  firstScoreMidi: number;
+  targetMidi: number;
+  frequency: number;
+}
 
 function findPitchedIndex(score: PitchScore, from: number, direction: 1 | -1): number {
   for (let index = from; index >= 0 && index < score.notes.length; index += direction) {
@@ -77,6 +82,8 @@ function App() {
   const [mode, setMode] = useState<PracticeMode>("step");
   const [transpose, setTranspose] = useState(0);
   const [referenceHz, setReferenceHz] = useState(440);
+  const [practiceBpm, setPracticeBpm] = useState(BUILT_IN_SCORES[0].tempo.bpm);
+  const [tonicCalibration, setTonicCalibration] = useState<TonicCalibration | null>(null);
   const [toleranceCents, setToleranceCents] = useState(35);
   const [tolerancePreset, setTolerancePreset] = useState<TolerancePreset>("standard");
   const [holdGoalMs, setHoldGoalMs] = useState(650);
@@ -116,6 +123,13 @@ function App() {
     () => scores.find((candidate) => candidate.metadata.id === selectedId) ?? scores[0],
     [scores, selectedId],
   );
+  const effectiveReferenceHz = tonicCalibration
+    ? referenceHzForAnchor(tonicCalibration.frequency, tonicCalibration.targetMidi)
+    : referenceHz;
+  const practiceScore = useMemo(
+    () => ({ ...selectedScore, tempo: { bpm: practiceBpm } }),
+    [practiceBpm, selectedScore],
+  );
   const selectedDisplay = scoreDisplayText(selectedScore, locale);
   const modeCopy: Record<PracticeMode, { label: string; short: string; detail: string }> = {
     step: {
@@ -134,17 +148,17 @@ function App() {
       detail: tr("录制完整一遍，演唱时隐藏 cents，结束后给出逐音报告并保留本机录音。", "Records a full take and hides cents while singing, then shows a note-by-note report and local recording."),
     },
   };
-  const totalDuration = scoreDurationSeconds(selectedScore);
+  const totalDuration = scoreDurationSeconds(practiceScore);
   const activeIndex = mode === "step"
     ? Math.min(stepIndex, Math.max(0, selectedScore.notes.length - 1))
-    : noteAtSeconds(selectedScore, playhead)?.index ?? -1;
+    : noteAtSeconds(practiceScore, playhead)?.index ?? -1;
   const activeNote = activeIndex >= 0 ? selectedScore.notes[activeIndex] : null;
   const targetMidi = activeNote?.midi === null || activeNote?.midi === undefined
     ? null
     : activeNote.midi + transpose;
-  const targetFrequency = targetMidi === null ? null : midiToFrequency(targetMidi, referenceHz);
+  const targetFrequency = targetMidi === null ? null : midiToFrequency(targetMidi, effectiveReferenceHz);
   const liveCents = reading && targetMidi !== null
-    ? centsBetweenFrequency(reading.frequency, targetMidi, referenceHz)
+    ? centsBetweenFrequency(reading.frequency, targetMidi, effectiveReferenceHz)
     : null;
   const isInTune = liveCents !== null && Math.abs(liveCents) <= toleranceCents;
   const progress = mode === "step"
@@ -158,8 +172,8 @@ function App() {
     modeRef.current = mode;
   }, [mode]);
   useEffect(() => {
-    referenceHzRef.current = referenceHz;
-  }, [referenceHz]);
+    referenceHzRef.current = effectiveReferenceHz;
+  }, [effectiveReferenceHz]);
 
   useEffect(() => {
     if (!toast) return;
@@ -171,7 +185,7 @@ function App() {
     if (!active || !reading || modeRef.current !== "step" || targetMidi === null) return;
     const delta = lastReadingAtRef.current ? Math.min(80, reading.capturedAt - lastReadingAtRef.current) : 0;
     lastReadingAtRef.current = reading.capturedAt;
-    const cents = centsBetweenFrequency(reading.frequency, targetMidi, referenceHz);
+    const cents = centsBetweenFrequency(reading.frequency, targetMidi, effectiveReferenceHz);
     const nextStable = Math.abs(cents) <= toleranceCents && reading.confidence >= 0.6
       ? stableMsRef.current + delta
       : Math.max(0, stableMsRef.current - delta * 1.5);
@@ -188,7 +202,7 @@ function App() {
         setStepIndex(nextIndex);
       }
     }
-  }, [active, holdGoalMs, locale, reading, referenceHz, selectedScore.notes.length, stepIndex, targetMidi, toleranceCents]);
+  }, [active, effectiveReferenceHz, holdGoalMs, locale, reading, selectedScore.notes.length, stepIndex, targetMidi, toleranceCents]);
 
   useEffect(() => {
     return () => {
@@ -345,7 +359,7 @@ function App() {
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     if (modeRef.current !== "step" && sessionFramesRef.current.length) {
       const result = buildSessionResult(
-        selectedScore,
+        practiceScore,
         sessionFramesRef.current,
         transpose,
         toleranceCents,
@@ -379,6 +393,8 @@ function App() {
       });
       setSelectedId(imported.metadata.id);
       setTranspose(0);
+      setTonicCalibration(null);
+      setPracticeBpm(imported.tempo.bpm);
       setSessionResult(null);
       setToast(tr(`已导入《${imported.metadata.title}》`, `Imported “${imported.metadata.title}”.`));
     } catch (error) {
@@ -399,9 +415,9 @@ function App() {
       const rawFrames = await analyzeAudioFile(file, setAnalysisProgress);
       const frames = rawFrames.map((frame) => ({
         ...frame,
-        midi: frame.frequency ? frequencyToMidi(frame.frequency, referenceHz) : null,
+        midi: frame.frequency ? frequencyToMidi(frame.frequency, effectiveReferenceHz) : null,
       }));
-      const result = buildSessionResult(selectedScore, frames, transpose, toleranceCents, file.name);
+      const result = buildSessionResult(practiceScore, frames, transpose, toleranceCents, file.name);
       setSessionResult(result);
       setToast(tr(`录音分析完成，音准得分 ${result.score}`, `Recording analyzed. Pitch score: ${result.score}.`));
     } catch {
@@ -412,24 +428,70 @@ function App() {
     }
   }
 
+  function changeTranspose(value: number | ((current: number) => number)) {
+    setTonicCalibration(null);
+    setTranspose((current) => {
+      const next = typeof value === "function" ? value(current) : value;
+      return Math.max(-12, Math.min(12, next));
+    });
+  }
+
+  function changeReferenceHz(value: number) {
+    setTonicCalibration(null);
+    setReferenceHz(Math.max(400, Math.min(480, value)));
+  }
+
   function captureTonic() {
     const firstNote = selectedScore.notes.find((note) => note.midi !== null);
     if (!reading || !firstNote || firstNote.midi === null) {
       setToast(tr("请先打开麦克风并唱出你想要的第一个音", "Connect the microphone and sing the first note you want to use."));
       return;
     }
-    const shift = Math.max(-12, Math.min(12, Math.round(reading.midi - firstNote.midi)));
+    const sungMidi = frequencyToMidi(reading.frequency, referenceHz);
+    const shift = Math.max(-12, Math.min(12, Math.round(sungMidi - firstNote.midi)));
+    const calibrated: TonicCalibration = {
+      firstScoreMidi: firstNote.midi,
+      targetMidi: firstNote.midi + shift,
+      frequency: reading.frequency,
+    };
     setTranspose(shift);
+    setTonicCalibration(calibrated);
     setToast(tr(
-      `已将当前音设为首音：${shift >= 0 ? "+" : ""}${shift} 半音`,
-      `First note set: ${shift >= 0 ? "+" : ""}${shift} semitones.`,
+      `首音已锁定为 ${midiToNoteName(calibrated.targetMidi)} = ${calibrated.frequency.toFixed(1)} Hz，后续按音程推导`,
+      `First note locked to ${midiToNoteName(calibrated.targetMidi)} = ${calibrated.frequency.toFixed(1)} Hz; later notes follow its intervals.`,
     ));
   }
 
-  function downloadTemplate() {
-    const blob = new Blob([JSON.stringify(emptySong, null, 2)], { type: "application/json" });
-    downloadBlob(blob, "my-song.singright.json");
-    setToast(tr("空白曲谱模板已下载", "Blank score template downloaded."));
+  async function downloadTemplate() {
+    try {
+      const blob = new Blob([JSON.stringify(emptySong, null, 2)], { type: "application/json" });
+      const result = await saveBlob(blob, "my-song.singright.json", {
+        title: tr("保存 SingRight 曲谱模板", "Save SingRight score template"),
+        filterName: "SingRight JSON",
+        extensions: ["json"],
+      });
+      setToast(result.saved
+        ? tr("曲谱模板已保存", "Score template saved.")
+        : tr("已取消保存", "Save canceled."));
+    } catch {
+      setToast(tr("无法保存曲谱模板，请检查目标文件夹权限", "Could not save the score template. Check the destination folder permissions."));
+    }
+  }
+
+  async function saveRecording() {
+    if (!recordingUrl) return;
+    try {
+      const blob = await fetch(recordingUrl).then((response) => response.blob());
+      const extension = recordingName.split(".").pop() || "webm";
+      const result = await saveBlob(blob, recordingName || `SingRight-recording.${extension}`, {
+        title: tr("保存本次录音", "Save this recording"),
+        filterName: tr("音频录音", "Audio recording"),
+        extensions: [extension],
+      });
+      setToast(result.saved ? tr("录音已保存", "Recording saved.") : tr("已取消保存", "Save canceled."));
+    } catch {
+      setToast(tr("无法保存录音，请检查目标文件夹权限", "Could not save the recording. Check the destination folder permissions."));
+    }
   }
 
   const gaugePosition = liveCents === null ? 50 : (clampCents(liveCents) + 100) / 2 * 100;
@@ -448,6 +510,8 @@ function App() {
           setScores((current) => [...current.filter((candidate) => candidate.metadata.id !== score.metadata.id), score]);
           setSelectedId(score.metadata.id);
           setTranspose(0);
+          setTonicCalibration(null);
+          setPracticeBpm(score.tempo.bpm);
           setStepIndex(0);
           setPlayhead(0);
           setSessionResult(null);
@@ -478,6 +542,8 @@ function App() {
                     if (active) stopPractice(false);
                     setSelectedId(score.metadata.id);
                     setTranspose(0);
+                    setTonicCalibration(null);
+                    setPracticeBpm(score.tempo.bpm);
                     setStepIndex(0);
                     setPlayhead(0);
                     setSessionResult(null);
@@ -552,9 +618,9 @@ function App() {
           </div>
           <div className="transpose-control" aria-label={tr("移调控制", "Transpose control")}>
             <span>{tr("移调", "Key")}</span>
-            <button onClick={() => setTranspose((value) => Math.max(-12, value - 1))} aria-label={tr("降半音", "Down one semitone")}>−</button>
+            <button onClick={() => changeTranspose((value) => value - 1)} aria-label={tr("降半音", "Down one semitone")}>−</button>
             <strong>{transpose > 0 ? `+${transpose}` : transpose}</strong>
-            <button onClick={() => setTranspose((value) => Math.min(12, value + 1))} aria-label={tr("升半音", "Up one semitone")}>＋</button>
+            <button onClick={() => changeTranspose((value) => value + 1)} aria-label={tr("升半音", "Up one semitone")}>＋</button>
             <button className="tonic-button" onClick={captureTonic}><Sparkles size={15} /> {tr("首音定调", "Set key from first note")}</button>
           </div>
         </section>
@@ -666,13 +732,13 @@ function App() {
           </div>
           <div className="quick-card">
             <SlidersHorizontal size={20} />
-            <div><span>{tr("当前标准", "Current standard")}</span><strong>A4 = {referenceHz} Hz · ±{toleranceCents} cents</strong></div>
+            <div><span>{tr("当前标准", "Current standard")}</span><strong>{practiceBpm} BPM · ±{toleranceCents} cents</strong></div>
             <button onClick={() => setShowSettings(true)}>{tr("调整", "Adjust")}</button>
           </div>
           <div className="quick-card">
             <ArrowDownToLine size={20} />
             <div><span>{tr("曲谱模板", "Score template")}</span><strong>.singright.json v1</strong></div>
-            <button onClick={downloadTemplate}>{tr("下载", "Download")}</button>
+            <button onClick={() => void downloadTemplate()}>{tr("下载", "Download")}</button>
           </div>
           <div className="quick-card composer-quick-card">
             <SquarePen size={20} />
@@ -695,6 +761,7 @@ function App() {
             recordingUrl={recordingUrl}
             recordingName={recordingName}
             transpose={transpose}
+            onSaveRecording={() => void saveRecording()}
           />
         )}
       </main>
@@ -712,10 +779,31 @@ function App() {
               <small>{tr("首次启动会采用安装包语言或系统语言，你可以随时在这里切换。", "The first launch uses the installer or system language. You can change it here anytime.")}</small>
             </label>
             <label>
-              <div><span>{tr("A4 参考频率", "A4 reference")}</span><strong>{referenceHz} Hz</strong></div>
-              <input type="range" min="430" max="450" value={referenceHz} onChange={(event) => setReferenceHz(Number(event.target.value))} />
-              <small>{tr("现代音乐通常使用 440 Hz；部分乐团或老录音会略有不同。", "Modern music usually uses 440 Hz; ensembles and older recordings may differ.")}</small>
+              <div><span>{tr("本次练习速度", "Practice tempo")}</span><strong>{practiceBpm} BPM</strong></div>
+              <input type="range" min="20" max="300" step="1" value={practiceBpm} onChange={(event) => setPracticeBpm(Number(event.target.value))} />
+              <small>{tr(`曲谱默认 ${selectedScore.tempo.bpm} BPM。这里只改变练习、跟唱和复盘速度，不会修改五线谱里的原始速度。`, `Score default: ${selectedScore.tempo.bpm} BPM. This changes practice, follow, and review timing without editing the score tempo.`)}</small>
+              <button className="setting-reset" onClick={() => setPracticeBpm(selectedScore.tempo.bpm)}>{tr("恢复曲谱默认速度", "Restore score tempo")}</button>
             </label>
+            <label>
+              <div><span>{tr("练习移调", "Practice transpose")}</span><strong>{transpose > 0 ? `+${transpose}` : transpose} {tr("半音", "semitones")}</strong></div>
+              <input type="range" min="-12" max="12" step="1" value={transpose} onChange={(event) => changeTranspose(Number(event.target.value))} />
+              <small>{tr("手动修改移调会解除首音锁定；曲谱本身保持不变。", "Changing transpose manually clears the first-note lock; the score itself stays unchanged.")}</small>
+            </label>
+            <label>
+              <div><span>{tr("A4 参考频率", "A4 reference")}</span><strong>{referenceHz} Hz</strong></div>
+              <input type="range" min="400" max="480" step="1" value={referenceHz} onChange={(event) => changeReferenceHz(Number(event.target.value))} />
+              <small>{tr("现代音乐通常使用 440 Hz。手动修改参考频率会解除首音锁定。", "Modern music usually uses 440 Hz. Changing the reference manually clears the first-note lock.")}</small>
+            </label>
+            <div className={`tonic-calibration-summary ${tonicCalibration ? "active" : ""}`}>
+              <Sparkles />
+              <span>
+                <strong>{tonicCalibration ? tr("首音已精确锁定", "First note is precisely locked") : tr("首音尚未锁定", "First note is not locked")}</strong>
+                <small>{tonicCalibration
+                  ? `${midiToNoteName(tonicCalibration.targetMidi)} = ${tonicCalibration.frequency.toFixed(1)} Hz · A4 ${effectiveReferenceHz.toFixed(2)} Hz`
+                  : tr("在练习室唱出第一个音，再点“首音定调”。", "Sing the first note in the practice room, then choose “Set key from first note”.")}</small>
+              </span>
+              {tonicCalibration && <button onClick={() => setTonicCalibration(null)}>{tr("解除", "Clear")}</button>}
+            </div>
             <label>
               <div><span>{tr("音准容差", "Pitch tolerance")}</span><strong>±{toleranceCents} cents</strong></div>
               <div className="tolerance-presets">
@@ -755,7 +843,7 @@ function App() {
             </label>
             <div className="settings-summary">
               <Gauge size={20} />
-              <span>{tr("这些设置同时作用于实时练习和录音分析。", "These settings apply to live practice and recording analysis.")}</span>
+              <span>{tr("速度、移调、首音、参考频率、容差与稳定时长都集中在这里；它们同时作用于实时练习和录音分析。", "Tempo, transpose, first-note lock, reference, tolerance, and hold time are all managed here and apply to live practice and recording analysis.")}</span>
             </div>
           </aside>
         </div>
@@ -824,12 +912,14 @@ function ReviewPanel({
   recordingUrl,
   recordingName,
   transpose,
+  onSaveRecording,
 }: {
   result: SessionResult | null;
   score: PitchScore;
   recordingUrl: string;
   recordingName: string;
   transpose: number;
+  onSaveRecording: () => void;
 }) {
   const { locale } = useI18n();
   const tr = (zh: string, en: string) => localize(locale, zh, en);
@@ -867,7 +957,7 @@ function ReviewPanel({
         <div className="recording-row">
           <div><CircleStop size={18} /><span><strong>{tr("本次录音", "This recording")}</strong><small>{tr("保存在当前设备，可播放或下载", "Stored on this device; play or download it")}</small></span></div>
           <audio controls src={recordingUrl} />
-          <a href={recordingUrl} download={recordingName}><ArrowDownToLine size={16} /> {tr("保存录音", "Save recording")}</a>
+          <button onClick={onSaveRecording}><ArrowDownToLine size={16} /> {tr("保存录音", "Save recording")}</button>
         </div>
       )}
     </section>

@@ -1,3 +1,4 @@
+@import "@fontsource/noto-music";
 @import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap");
 
 :root {
@@ -176,7 +177,7 @@ button { color: inherit; }
 .recording-row { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; display: flex; align-items: center; gap: 15px; }
 .recording-row > div { display: flex; align-items: center; gap: 9px; }.recording-row span { display: grid; gap: 2px; }.recording-row strong { font-size: 10px; }.recording-row small { font-size: 8px; color: #8b9690; }
 .recording-row audio { height: 34px; flex: 1; }
-.recording-row a { text-decoration: none; background: var(--green-dark); color: #fff; border-radius: 9px; padding: 9px 11px; display: flex; gap: 6px; align-items: center; font-size: 9px; }
+.recording-row > button { border: 0; background: var(--green-dark); color: #fff; border-radius: 9px; padding: 9px 11px; display: flex; gap: 6px; align-items: center; font-size: 9px; cursor: pointer; }
 
 .settings-backdrop { position: fixed; inset: 0; background: rgba(18, 27, 22, .3); backdrop-filter: blur(3px); z-index: 10; display: flex; justify-content: flex-end; }
 .settings-drawer { width: 390px; background: #f8f6ef; padding: 28px; height: 100%; overflow-y: auto; box-shadow: -20px 0 50px rgba(23, 34, 28, .16); }
@@ -192,6 +193,14 @@ button { color: inherit; }
 .tolerance-presets button.active { color: #fff; border-color: #365c46; background: #365c46; }
 .tolerance-presets button.active small { color: #d6e5dc; }
 .settings-drawer small { color: #89958e; font-size: 9px; line-height: 1.6; }
+.setting-reset { justify-self: start; padding: 6px 9px; border: 1px solid #d8d5cd; border-radius: 7px; color: #55645b; background: #fffefa; font-size: 9px; cursor: pointer; }
+.tonic-calibration-summary { margin-top: 18px; padding: 13px; border: 1px solid #dad8d1; border-radius: 11px; display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 9px; color: #7b867f; background: #efede7; }
+.tonic-calibration-summary > svg { width: 19px; }
+.tonic-calibration-summary > span { display: grid; gap: 3px; }
+.tonic-calibration-summary strong { font-size: 10px; }
+.tonic-calibration-summary small { font: 8px/1.5 "DM Mono", monospace; }
+.tonic-calibration-summary > button { padding: 6px 8px; border: 1px solid #d0b48f; border-radius: 7px; color: #845325; background: #fff8ef; font-size: 8px; cursor: pointer; }
+.tonic-calibration-summary.active { color: #714715; border-color: #e2af73; background: #fff0dd; }
 .settings-summary { margin-top: 25px; background: #e8ebe5; color: #5d6c63; border-radius: 12px; padding: 13px; display: flex; gap: 10px; align-items: center; font-size: 10px; }
 .toast { position: fixed; z-index: 20; bottom: 28px; left: 50%; transform: translateX(-50%); background: #19271f; color: #fff; border-radius: 12px; padding: 11px 16px; display: flex; align-items: center; gap: 8px; font-size: 11px; box-shadow: 0 12px 30px rgba(20, 30, 25, .25); }
 

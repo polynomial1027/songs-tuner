@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { downloadBlob } from "./download";
+import { downloadBlob, saveBlob } from "./download";
 
 describe("downloadBlob", () => {
   afterEach(() => {
@@ -34,5 +34,27 @@ describe("downloadBlob", () => {
 
     vi.advanceTimersByTime(1000);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:singright-download");
+  });
+
+  it("uses the browser download fallback outside Tauri", async () => {
+    const click = vi.fn();
+    const anchor = { href: "", download: "", style: { display: "" }, click, remove: vi.fn() };
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => anchor),
+      body: { appendChild: vi.fn() },
+    });
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:browser-fallback"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    const result = await saveBlob(new Blob(["recording"]), "take.webm", {
+      filterName: "Audio",
+      extensions: ["webm"],
+    });
+
+    expect(result).toEqual({ saved: true });
+    expect(anchor.download).toBe("take.webm");
+    expect(click).toHaveBeenCalledOnce();
   });
 });

@@ -2,6 +2,9 @@ import type { PitchScore, ScoreNote } from "../types";
 
 export type Clef = "treble" | "bass";
 export type Accidental = -1 | 0 | 1;
+export type PlacementIssue = "invalid-grid" | "crosses-measure" | "overlap";
+
+export const EDIT_GRID_BEATS = 0.125;
 
 export const DURATION_OPTIONS = [
   { beats: 4, label: "全音符", glyph: "○", shortcut: "1" },
@@ -64,12 +67,39 @@ export function scoreEndBeat(score: PitchScore): number {
   return score.notes.reduce((end, note) => Math.max(end, note.beat + note.durationBeats), 0);
 }
 
+export function measureLengthBeats(score: Pick<PitchScore, "timeSignature">): number {
+  return score.timeSignature.beats * (4 / score.timeSignature.beatUnit);
+}
+
 export function quantizeBeat(beat: number, grid: number): number {
   return Math.max(0, Math.round(beat / grid) * grid);
 }
 
 export function nextOpenBeat(score: PitchScore): number {
   return scoreEndBeat(score);
+}
+
+export function notePlacementIssue(
+  score: PitchScore,
+  note: ScoreNote,
+  ignoreId?: string,
+): PlacementIssue | null {
+  const measureBeats = measureLengthBeats(score);
+  const start = note.beat;
+  const end = note.beat + note.durationBeats;
+  const startsOnGrid = Math.abs(start / EDIT_GRID_BEATS - Math.round(start / EDIT_GRID_BEATS)) < 0.0001;
+  const durationOnGrid = Math.abs(note.durationBeats / EDIT_GRID_BEATS - Math.round(note.durationBeats / EDIT_GRID_BEATS)) < 0.0001;
+  if (start < 0 || note.durationBeats <= 0 || !startsOnGrid || !durationOnGrid) return "invalid-grid";
+
+  const measureStart = Math.floor((start + 0.0001) / measureBeats) * measureBeats;
+  if (end > measureStart + measureBeats + 0.0001) return "crosses-measure";
+
+  const overlaps = score.notes.some((candidate) => {
+    if (candidate.id === ignoreId || candidate.id === note.id) return false;
+    const candidateEnd = candidate.beat + candidate.durationBeats;
+    return candidateEnd > start + 0.0001 && candidate.beat < end - 0.0001;
+  });
+  return overlaps ? "overlap" : null;
 }
 
 export function placeNote(score: PitchScore, note: ScoreNote): PitchScore {
@@ -99,11 +129,12 @@ export function makeNoteId(): string {
   return `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-export function midiSpelling(midi: number, fifths = 0): string {
+export function midiSpelling(midi: number, fifths = 0, accidentalPreference: Accidental = 0): string {
   const rounded = Math.max(0, Math.min(127, Math.round(midi)));
   const pitchClass = ((rounded % 12) + 12) % 12;
   const octave = Math.floor(rounded / 12) - 1;
-  return `${(fifths < 0 ? FLAT_NAMES : SHARP_NAMES)[pitchClass]}${octave}`;
+  const preferFlats = accidentalPreference < 0 || (accidentalPreference === 0 && fifths < 0);
+  return `${(preferFlats ? FLAT_NAMES : SHARP_NAMES)[pitchClass]}${octave}`;
 }
 
 export function parseSpelling(spelling: string): { step: string; alter: number; octave: number } {
@@ -148,6 +179,17 @@ export function durationName(beats: number): string {
   if (exact) return exact.label;
   const dotted = DURATION_OPTIONS.find((option) => option.beats * 1.5 === beats);
   return dotted ? `附点${dotted.label}` : `${beats} 拍`;
+}
+
+export function restGlyphForBeats(beats: number): string {
+  const undotted = DURATION_OPTIONS.some((option) => Math.abs(option.beats * 1.5 - beats) < 0.001)
+    ? beats / 1.5
+    : beats;
+  if (undotted >= 4) return "𝄻";
+  if (undotted >= 2) return "𝄼";
+  if (undotted >= 1) return "𝄽";
+  if (undotted >= 0.5) return "𝄾";
+  return "𝄿";
 }
 
 export function noteTypeForBeats(beats: number): "whole" | "half" | "quarter" | "eighth" | "16th" {

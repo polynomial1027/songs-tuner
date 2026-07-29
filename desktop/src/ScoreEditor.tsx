@@ -15,7 +15,6 @@ import {
   ListMusic,
   Minus,
   MousePointer2,
-  Music,
   Pause,
   Play,
   Plus,
@@ -31,22 +30,23 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { localize, useI18n } from "./i18n";
-import { downloadBlob } from "./lib/download";
+import { saveBlob } from "./lib/download";
 import {
   DURATION_OPTIONS,
+  EDIT_GRID_BEATS,
   KEY_SIGNATURES,
   cloneScore,
-  createEmptyScore,
   deleteNote,
   durationName,
   makeNoteId,
-  midiForStaffY,
-  midiFromStep,
+  measureLengthBeats,
   midiSpelling,
   nextOpenBeat,
+  notePlacementIssue,
   noteTypeForBeats,
   placeNote,
   quantizeBeat,
+  restGlyphForBeats,
   scoreEndBeat,
   staffYForMidi,
   updateNote,
@@ -58,7 +58,6 @@ import { validateScore } from "./lib/score";
 import type { PitchScore, ScoreNote } from "./types";
 import "./score-editor.css";
 
-type EditorTool = "select" | "note" | "rest";
 type NotationView = "staff" | "numbered" | "split";
 
 interface ScoreEditorProps {
@@ -73,11 +72,6 @@ interface StaffCanvasProps {
   cursorBeat: number;
   playbackBeat: number;
   zoom: number;
-  tool: EditorTool;
-  accidental: Accidental;
-  onCanvasAction: (beat: number, midi: number) => void;
-  onSelect: (id: string) => void;
-  onMoveCursor: (beat: number) => void;
 }
 
 const AUTOSAVE_KEY = "singright-composer-autosave-v1";
@@ -85,20 +79,20 @@ const SVG_WIDTH = 1200;
 const SYSTEM_HEIGHT = 172;
 const STAFF_LEFT = 155;
 const STAFF_RIGHT = 1160;
-const PITCH_CLASSES = [
-  { step: "C", accidental: 0 as Accidental, label: "C" },
-  { step: "C", accidental: 1 as Accidental, label: "C♯" },
-  { step: "D", accidental: 0 as Accidental, label: "D" },
-  { step: "D", accidental: 1 as Accidental, label: "D♯" },
-  { step: "E", accidental: 0 as Accidental, label: "E" },
-  { step: "F", accidental: 0 as Accidental, label: "F" },
-  { step: "F", accidental: 1 as Accidental, label: "F♯" },
-  { step: "G", accidental: 0 as Accidental, label: "G" },
-  { step: "G", accidental: 1 as Accidental, label: "G♯" },
-  { step: "A", accidental: 0 as Accidental, label: "A" },
-  { step: "A", accidental: 1 as Accidental, label: "A♯" },
-  { step: "B", accidental: 0 as Accidental, label: "B" },
-];
+const CHROMATIC_KEYBOARD = [
+  { code: "KeyQ", key: "Q", semitone: 0 },
+  { code: "KeyW", key: "W", semitone: 1 },
+  { code: "KeyE", key: "E", semitone: 2 },
+  { code: "KeyR", key: "R", semitone: 3 },
+  { code: "KeyT", key: "T", semitone: 4 },
+  { code: "KeyY", key: "Y", semitone: 5 },
+  { code: "KeyU", key: "U", semitone: 6 },
+  { code: "KeyI", key: "I", semitone: 7 },
+  { code: "KeyO", key: "O", semitone: 8 },
+  { code: "KeyP", key: "P", semitone: 9 },
+  { code: "BracketLeft", key: "[", semitone: 10 },
+  { code: "BracketRight", key: "]", semitone: 11 },
+] as const;
 
 function localizedKeyName(name: string, locale: "zh-CN" | "en"): string {
   if (locale === "zh-CN") return name;
@@ -146,18 +140,14 @@ function StaffCanvas({
   cursorBeat,
   playbackBeat,
   zoom,
-  tool,
-  accidental,
-  onCanvasAction,
-  onSelect,
-  onMoveCursor,
 }: StaffCanvasProps) {
   const { locale } = useI18n();
   const tr = (zh: string, en: string) => localize(locale, zh, en);
   const clef = score.notation?.clef ?? "treble";
   const fifths = score.notation?.keySignature ?? 0;
+  const beatsPerMeasure = measureLengthBeats(score);
   const measuresPerSystem = Math.max(2, Math.min(6, Math.round(7 - zoom)));
-  const beatsPerSystem = measuresPerSystem * score.timeSignature.beats;
+  const beatsPerSystem = measuresPerSystem * beatsPerMeasure;
   const minSystems = Math.max(1, Math.ceil(Math.max(scoreEndBeat(score), cursorBeat + 1) / beatsPerSystem));
   const systemCount = Math.min(24, minSystems);
   const height = systemCount * SYSTEM_HEIGHT;
@@ -167,30 +157,13 @@ function StaffCanvas({
     return STAFF_LEFT + (within / beatsPerSystem) * (STAFF_RIGHT - STAFF_LEFT);
   }
 
-  function handleStaffClick(event: React.MouseEvent<SVGRectElement>, systemIndex: number) {
-    const svg = event.currentTarget.ownerSVGElement;
-    if (!svg) return;
-    const point = svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
-    const local = point.matrixTransform(svg.getScreenCTM()?.inverse());
-    const beatWithin = ((local.x - STAFF_LEFT) / (STAFF_RIGHT - STAFF_LEFT)) * beatsPerSystem;
-    const beat = quantizeBeat(systemIndex * beatsPerSystem + beatWithin, 0.25);
-    const localY = local.y - systemIndex * SYSTEM_HEIGHT;
-    if (tool === "select") {
-      onMoveCursor(beat);
-      return;
-    }
-    onCanvasAction(beat, midiForStaffY(localY, clef, accidental));
-  }
-
   return (
-    <div className="notation-scroll" aria-label={tr("可编辑五线谱", "Editable staff notation")}>
+    <div className="notation-scroll" aria-label={tr("键盘控制的五线谱", "Keyboard-controlled staff notation")}>
       <svg
-        className={`notation-svg tool-${tool}`}
+        className="notation-svg keyboard-only"
         viewBox={`0 0 ${SVG_WIDTH} ${height}`}
-        role="application"
-        aria-label={tr("点击谱面输入音符；点击已有音符进行编辑", "Click the staff to enter notes; click an existing note to edit it")}
+        role="img"
+        aria-label={tr("谱面只用于显示；按 Enter 开始键盘录入", "Display-only score; press Enter to start keyboard entry")}
       >
         {Array.from({ length: systemCount }, (_, systemIndex) => {
           const top = systemIndex * SYSTEM_HEIGHT;
@@ -203,7 +176,6 @@ function StaffCanvas({
                 y="23"
                 width={STAFF_RIGHT - STAFF_LEFT}
                 height="91"
-                onClick={(event) => handleStaffClick(event, systemIndex)}
               />
               <text className="measure-label" x="20" y="29">
                 {`${systemIndex * measuresPerSystem + 1}–${(systemIndex + 1) * measuresPerSystem}`}
@@ -223,10 +195,12 @@ function StaffCanvas({
                 const x = STAFF_LEFT + (measure / measuresPerSystem) * (STAFF_RIGHT - STAFF_LEFT);
                 return <line className="bar-line" key={measure} x1={x} x2={x} y1="51" y2="91" />;
               })}
-              {Array.from({ length: beatsPerSystem }, (_, beat) => {
-                if (beat % score.timeSignature.beats === 0) return null;
+              {Array.from({ length: Math.round(beatsPerSystem / EDIT_GRID_BEATS) }, (_, slot) => {
+                const beat = slot * EDIT_GRID_BEATS;
+                if (Math.abs(beat % beatsPerMeasure) < 0.0001) return null;
                 const x = STAFF_LEFT + (beat / beatsPerSystem) * (STAFF_RIGHT - STAFF_LEFT);
-                return <line className="beat-guide" key={beat} x1={x} x2={x} y1="45" y2="99" />;
+                const quarterBeat = Math.abs(beat % 1) < 0.0001;
+                return <line className={quarterBeat ? "beat-guide" : "slot-guide"} key={slot} x1={x} x2={x} y1={quarterBeat ? 45 : 49} y2={quarterBeat ? 99 : 95} />;
               })}
               {score.notes.filter((note) => note.beat >= systemStart && note.beat < systemStart + beatsPerSystem).map((note) => {
                 const x = xForBeat(note.beat);
@@ -241,19 +215,14 @@ function StaffCanvas({
                   <g
                     className={`notation-note ${selected ? "selected" : ""} ${note.midi === null ? "is-rest" : ""}`}
                     key={note.id}
-                    role="button"
                     aria-label={tr(
                       `${note.midi === null ? "休止符" : midiToNoteName(note.midi)}，${durationName(note.durationBeats)}，第 ${note.beat + 1} 拍`,
                       `${note.midi === null ? "Rest" : midiToNoteName(note.midi)}, ${note.durationBeats} beats, starts at beat ${note.beat + 1}`,
                     )}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSelect(note.id);
-                    }}
                   >
                     {selected && <circle className="selection-halo" cx={x} cy={noteY} r="18" />}
                     {note.midi === null ? (
-                      <text className="rest-glyph" x={x} y={noteY + 7}>𝄽</text>
+                      <text className="rest-glyph" x={x} y={noteY + 7}>{restGlyphForBeats(note.durationBeats)}</text>
                     ) : (
                       <>
                         {ledgerYs(noteY).map((y) => <line className="ledger-line" key={y} x1={x - 13} x2={x + 13} y1={y} y2={y} />)}
@@ -310,23 +279,19 @@ function NumberedScoreCanvas({
   selectedId,
   cursorBeat,
   playbackBeat,
-  onSelect,
-  onMoveCursor,
 }: {
   score: PitchScore;
   selectedId: string | null;
   cursorBeat: number;
   playbackBeat: number;
-  onSelect: (id: string) => void;
-  onMoveCursor: (beat: number) => void;
 }) {
   const { locale } = useI18n();
   const tr = (zh: string, en: string) => localize(locale, zh, en);
-  const beatsPerMeasure = score.timeSignature.beats;
+  const beatsPerMeasure = measureLengthBeats(score);
   const measureCount = Math.max(1, Math.ceil(Math.max(scoreEndBeat(score), beatsPerMeasure) / beatsPerMeasure));
 
   return (
-    <div className="numbered-scroll" role="application" aria-label={tr("可编辑简谱", "Editable numbered notation")}>
+    <div className="numbered-scroll" aria-label={tr("键盘控制的简谱", "Keyboard-controlled numbered notation")}>
       <div className="numbered-key-line">
         <span>{tr("调号", "Key")} · 1 = <strong>{midiToNoteName(score.tuning.tonicMidi)}</strong></span>
         <span>{score.timeSignature.beats}/{score.timeSignature.beatUnit}</span>
@@ -340,14 +305,7 @@ function NumberedScoreCanvas({
           const cursorHere = cursorBeat >= start && cursorBeat < end;
           const playheadHere = playbackBeat >= start && playbackBeat < end;
           return (
-            <div
-              className={`numbered-measure ${cursorHere ? "cursor-here" : ""}`}
-              key={measureIndex}
-              onClick={(event) => {
-                const rect = event.currentTarget.getBoundingClientRect();
-                onMoveCursor(quantizeBeat(start + ((event.clientX - rect.left) / rect.width) * beatsPerMeasure, 0.25));
-              }}
-            >
+            <div className={`numbered-measure ${cursorHere ? "cursor-here" : ""}`} key={measureIndex}>
               <span className="numbered-measure-label">{measureIndex + 1}</span>
               {Array.from({ length: beatsPerMeasure }, (_, beat) => <i className="numbered-beat-guide" key={beat} style={{ left: `${(beat / beatsPerMeasure) * 100}%` }} />)}
               {notes.map((note) => {
@@ -356,21 +314,17 @@ function NumberedScoreCanvas({
                 const numeral = note.midi === null ? "0" : note.numeral || numeralForMidi(note.midi, score.tuning.tonicMidi);
                 const underlineCount = note.durationBeats <= 0.25 ? 2 : note.durationBeats <= 0.5 ? 1 : 0;
                 return (
-                  <button
+                  <span
                     className={`numbered-note ${selectedId === note.id ? "selected" : ""}`}
                     key={note.id}
                     style={{ left: `${left}%`, width: `${Math.min(100 - left, width)}%` }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSelect(note.id);
-                    }}
                     aria-label={note.midi === null ? tr("休止符", "Rest") : midiToNoteName(note.midi)}
                   >
                     <strong>{numeral}</strong>
                     {underlineCount > 0 && <span className={`duration-underlines lines-${underlineCount}`} />}
                     {note.durationBeats > 1 && <span className="duration-dashes">{"—".repeat(Math.max(1, Math.round(note.durationBeats - 1)))}</span>}
                     <small>{note.lyric || (note.midi === null ? "" : midiToNoteName(note.midi))}</small>
-                  </button>
+                  </span>
                 );
               })}
               {cursorHere && <b className="numbered-cursor" style={{ left: `${((cursorBeat - start) / beatsPerMeasure) * 100}%` }} />}
@@ -430,7 +384,7 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
   const [past, setPast] = useState<PitchScore[]>([]);
   const [future, setFuture] = useState<PitchScore[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialScore.notes[0]?.id ?? null);
-  const [tool, setTool] = useState<EditorTool>("note");
+  const [entryMode, setEntryMode] = useState(false);
   const [duration, setDuration] = useState(1);
   const [dotted, setDotted] = useState(false);
   const [accidental, setAccidental] = useState<Accidental>(0);
@@ -471,7 +425,8 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
     [draft.notes, selectedId],
   );
   const effectiveDuration = dotted ? duration * 1.5 : duration;
-  const measureCount = Math.max(1, Math.ceil(Math.max(scoreEndBeat(draft), draft.timeSignature.beats) / draft.timeSignature.beats));
+  const measureBeats = measureLengthBeats(draft);
+  const measureCount = Math.max(1, Math.ceil(Math.max(scoreEndBeat(draft), measureBeats) / measureBeats));
   const audioGuide = draft.audioGuide;
   const trimStart = Math.min(audioDuration, audioGuide?.trimStartSeconds ?? 0);
   const trimEnd = Math.min(audioDuration, audioGuide?.trimEndSeconds ?? audioDuration);
@@ -547,16 +502,17 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
     audioContextRef.current = context;
     await context.resume();
     const secondsPerBeat = 60 / draft.tempo.bpm;
-    const countInBeats = countIn ? draft.timeSignature.beats : 0;
+    const scoreMeasureBeats = measureLengthBeats(draft);
+    const countInBeats = countIn ? scoreMeasureBeats : 0;
     const delay = countInBeats * secondsPerBeat;
-    const rangeStart = loop ? (loopStartMeasure - 1) * draft.timeSignature.beats : fromBeat;
-    const loopEnd = Math.max(rangeStart + 0.25, loopEndMeasure * draft.timeSignature.beats);
+    const rangeStart = loop ? (loopStartMeasure - 1) * scoreMeasureBeats : fromBeat;
+    const loopEnd = Math.max(rangeStart + 0.25, loopEndMeasure * scoreMeasureBeats);
     const audioScoreDuration = audioGuide && audioDuration
       ? audioGuide.offsetSeconds + Math.max(0, trimEnd - trimStart) / audioGuide.playbackRate
       : 0;
     const endBeat = loop
       ? loopEnd
-      : Math.max(scoreEndBeat(draft), (audioScoreDuration * draft.tempo.bpm) / 60, draft.timeSignature.beats);
+      : Math.max(scoreEndBeat(draft), (audioScoreDuration * draft.tempo.bpm) / 60, scoreMeasureBeats);
     const now = context.currentTime + 0.05;
     const master = context.createGain();
     master.gain.value = 0.2;
@@ -585,7 +541,7 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
         const oscillator = context.createOscillator();
         const gain = context.createGain();
         const absoluteBeat = rangeStart + Math.max(0, beat);
-        oscillator.frequency.value = absoluteBeat % draft.timeSignature.beats === 0 ? 1320 : 920;
+        oscillator.frequency.value = Math.abs(absoluteBeat % scoreMeasureBeats) < 0.0001 ? 1320 : 920;
         gain.gain.setValueAtTime(0.55, now + delay + beat * secondsPerBeat);
         gain.gain.exponentialRampToValueAtTime(0.001, now + delay + beat * secondsPerBeat + 0.045);
         oscillator.connect(gain).connect(context.destination);
@@ -647,37 +603,35 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
   }, [audioUrl, stopPlayback]);
 
   const addNote = useCallback((midi: number | null, beat = cursorBeat) => {
+    const start = quantizeBeat(beat, EDIT_GRID_BEATS);
+    const existing = draft.notes.find((note) => Math.abs(note.beat - start) < 0.0001);
     const note: ScoreNote = {
-      id: makeNoteId(),
+      ...(existing ?? {}),
+      id: existing?.id ?? makeNoteId(),
       midi,
-      beat: quantizeBeat(beat, 0.25),
+      beat: start,
       durationBeats: effectiveDuration,
-      spelling: midi === null ? undefined : midiSpelling(midi, draft.notation?.keySignature),
+      spelling: midi === null ? undefined : midiSpelling(midi, draft.notation?.keySignature, accidental),
       numeral: midi === null ? undefined : numeralForMidi(midi, draft.tuning.tonicMidi),
-      lyric: "",
+      lyric: existing?.lyric ?? "",
     };
+    const issue = notePlacementIssue(draft, note, existing?.id);
+    if (issue) {
+      setToast(issue === "crosses-measure"
+        ? tr("这个时值会越过小节线，请缩短时值或移动光标", "This duration crosses the barline. Choose a shorter value or move the cursor.")
+        : issue === "overlap"
+          ? tr("这些固定槽位已经被其他音符占用", "Those fixed slots are already occupied by another note.")
+          : tr("音符必须落在固定的时值网格上", "Notes must align to the fixed duration grid."));
+      return;
+    }
     commit((current) => placeNote(current, note));
     setSelectedId(note.id);
     setCursorBeat(note.beat + note.durationBeats);
-  }, [commit, cursorBeat, draft.notation?.keySignature, draft.tuning.tonicMidi, effectiveDuration]);
-
-  const addNumeral = useCallback((degree: number) => {
-    if (degree === 0) {
-      addNote(null);
-      return;
-    }
-    const intervals = [0, 2, 4, 5, 7, 9, 11];
-    const tonicPitchClass = ((draft.tuning.tonicMidi % 12) + 12) % 12;
-    const midi = Math.max(0, Math.min(127, (inputOctave + 1) * 12 + tonicPitchClass + intervals[degree - 1] + accidental));
-    addNote(midi);
-  }, [accidental, addNote, draft.tuning.tonicMidi, inputOctave]);
+  }, [accidental, commit, cursorBeat, draft, effectiveDuration, tr]);
 
   function duplicateSelected() {
     if (!selectedNote) return;
-    const copy = { ...selectedNote, id: makeNoteId(), beat: selectedNote.beat + selectedNote.durationBeats };
-    commit((current) => placeNote(current, copy));
-    setSelectedId(copy.id);
-    setCursorBeat(copy.beat + copy.durationBeats);
+    addNote(selectedNote.midi, selectedNote.beat + selectedNote.durationBeats);
   }
 
   function removeSelected() {
@@ -686,6 +640,37 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
     const previousIndex = draft.notes.findIndex((note) => note.id === selectedId);
     setSelectedId(draft.notes[previousIndex - 1]?.id ?? draft.notes[previousIndex + 1]?.id ?? null);
   }
+
+  const moveEditCursor = useCallback((beat: number) => {
+    const nextBeat = quantizeBeat(Math.max(0, beat), EDIT_GRID_BEATS);
+    setCursorBeat(nextBeat);
+    setSelectedId(draft.notes.find((note) => Math.abs(note.beat - nextBeat) < 0.0001)?.id ?? null);
+  }, [draft.notes]);
+
+  const removePrevious = useCallback(() => {
+    const previous = [...draft.notes]
+      .filter((note) => note.beat < cursorBeat - 0.0001)
+      .sort((a, b) => b.beat - a.beat)[0];
+    if (!previous) {
+      setToast(tr("光标前没有可以删除的音符", "There is no note before the cursor."));
+      return;
+    }
+    commit((current) => deleteNote(current, previous.id));
+    setCursorBeat(previous.beat);
+    setSelectedId(draft.notes
+      .filter((note) => note.id !== previous.id && note.beat < previous.beat)
+      .sort((a, b) => b.beat - a.beat)[0]?.id ?? null);
+  }, [commit, cursorBeat, draft.notes, tr]);
+
+  const removeAtCursor = useCallback(() => {
+    const current = draft.notes.find((note) => Math.abs(note.beat - cursorBeat) < 0.0001);
+    if (!current) {
+      setToast(tr("当前固定槽位没有音符", "There is no note in the current slot."));
+      return;
+    }
+    commit((score) => deleteNote(score, current.id));
+    setSelectedId(null);
+  }, [commit, cursorBeat, draft.notes, tr]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -703,62 +688,74 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
         redo();
         return;
       }
-      if (event.code === "Space") {
+      if (command) return;
+      if (event.key === "Escape") {
         event.preventDefault();
-        if (isPlaying) stopPlayback(false);
-        else void startPlayback();
+        setEntryMode(false);
         return;
       }
-      if (notationView !== "staff" && /^[0-7]$/.test(event.key)) {
+      if (event.key === "Enter") {
         event.preventDefault();
-        addNumeral(Number(event.key));
+        setEntryMode((value) => !value);
         return;
       }
+      if (!entryMode) {
+        if (event.code === "Space") {
+          event.preventDefault();
+          if (isPlaying) stopPlayback(false);
+          else void startPlayback();
+        }
+        return;
+      }
+
       const durationIndex = Number(event.key) - 1;
-      if (notationView === "staff" && durationIndex >= 0 && durationIndex < DURATION_OPTIONS.length) {
+      if (durationIndex >= 0 && durationIndex < DURATION_OPTIONS.length) {
+        event.preventDefault();
         setDuration(DURATION_OPTIONS[durationIndex].beats);
         return;
       }
-      if (event.key.toLowerCase() === "r") {
+
+      const chromaticKey = CHROMATIC_KEYBOARD.find((item) => item.code === event.code);
+      if (chromaticKey) {
         event.preventDefault();
-        setTool("rest");
+        addNote(Math.max(0, Math.min(127, (inputOctave + 1) * 12 + chromaticKey.semitone)));
+        return;
+      }
+      if (event.code === "Space") {
+        event.preventDefault();
         addNote(null);
         return;
       }
-      if ("abcdefg".includes(event.key.toLowerCase())) {
+      if (event.key === "Backspace") {
         event.preventDefault();
-        const step = event.key.toUpperCase();
-        addNote(midiFromStep(step, inputOctave, accidental));
+        removePrevious();
         return;
       }
-      if (event.key === "Backspace" || event.key === "Delete") {
+      if (event.key === "Delete") {
         event.preventDefault();
-        removeSelected();
+        removeAtCursor();
         return;
       }
-      if (selectedNote?.midi !== null && selectedNote && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         event.preventDefault();
-        const amount = (event.shiftKey ? 12 : 1) * (event.key === "ArrowUp" ? 1 : -1);
-        const midi = Math.max(0, Math.min(127, selectedNote.midi + amount));
-        commit((current) => updateNote(current, selectedNote.id, {
-          midi,
-          spelling: midiSpelling(midi, current.notation?.keySignature),
-          numeral: numeralForMidi(midi, current.tuning.tonicMidi),
-        }));
+        setInputOctave((value) => Math.max(1, Math.min(7, value + (event.key === "ArrowUp" ? 1 : -1))));
+        return;
       }
-      if (selectedNote && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        const index = draft.notes.findIndex((note) => note.id === selectedNote.id);
-        const next = draft.notes[index + (event.key === "ArrowRight" ? 1 : -1)];
-        if (next) {
-          setSelectedId(next.id);
-          setCursorBeat(next.beat);
-        }
+        const step = event.shiftKey ? measureBeats : EDIT_GRID_BEATS;
+        moveEditCursor(cursorBeat + step * (event.key === "ArrowRight" ? 1 : -1));
+        return;
+      }
+      if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        const measureStart = Math.floor(cursorBeat / measureBeats) * measureBeats;
+        moveEditCursor(event.key === "Home" ? measureStart : measureStart + measureBeats);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [accidental, addNote, addNumeral, commit, draft.notes, inputOctave, isPlaying, notationView, redo, selectedNote, startPlayback, stopPlayback, undo]);
+  }, [addNote, cursorBeat, entryMode, inputOctave, isPlaying, measureBeats, moveEditCursor, redo, removeAtCursor, removePrevious, startPlayback, stopPlayback, undo]);
 
   async function attachAudio(file: File | undefined) {
     if (!file) return;
@@ -815,15 +812,37 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
     }
   }
 
-  function exportScore(kind: "json" | "musicxml" | "midi") {
+  async function exportScore(kind: "json" | "musicxml" | "midi") {
     const base = safeFileBase(draft.metadata.title);
-    if (kind === "json") {
-      downloadBlob(new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }), `${base}.singright.json`);
-    } else if (kind === "musicxml") {
-      downloadBlob(new Blob([scoreToMusicXml(draft)], { type: "application/vnd.recordare.musicxml+xml" }), `${base}.musicxml`);
-    } else {
-      const midi = scoreToMidi(draft);
-      downloadBlob(new Blob([midi.buffer as ArrayBuffer], { type: "audio/midi" }), `${base}.mid`);
+    try {
+      const file = kind === "json"
+        ? {
+          blob: new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }),
+          name: `${base}.singright.json`,
+          filter: "SingRight JSON",
+          extensions: ["json"],
+        }
+        : kind === "musicxml"
+          ? {
+            blob: new Blob([scoreToMusicXml(draft)], { type: "application/vnd.recordare.musicxml+xml" }),
+            name: `${base}.musicxml`,
+            filter: "MusicXML",
+            extensions: ["musicxml", "xml"],
+          }
+          : {
+            blob: new Blob([scoreToMidi(draft).buffer as ArrayBuffer], { type: "audio/midi" }),
+            name: `${base}.mid`,
+            filter: "MIDI",
+            extensions: ["mid", "midi"],
+          };
+      const result = await saveBlob(file.blob, file.name, {
+        title: tr("导出曲谱", "Export score"),
+        filterName: file.filter,
+        extensions: file.extensions,
+      });
+      setToast(result.saved ? tr(`已保存 ${file.name}`, `Saved ${file.name}`) : tr("已取消导出", "Export canceled."));
+    } catch {
+      setToast(tr("无法保存曲谱，请检查目标文件夹权限", "Could not save the score. Check the destination folder permissions."));
     }
   }
 
@@ -857,11 +876,43 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
 
   function patchSelected(patch: Partial<ScoreNote>) {
     if (!selectedNote) return;
+    const candidate = { ...selectedNote, ...patch, id: selectedNote.id };
+    const issue = notePlacementIssue(draft, candidate, selectedNote.id);
+    if (issue) {
+      setToast(issue === "crosses-measure"
+        ? tr("修改后会越过小节线，已保留原值", "That change would cross the barline, so the original value was kept.")
+        : issue === "overlap"
+          ? tr("修改后会占用已有音符的槽位，已保留原值", "That change would occupy another note's slots, so the original value was kept.")
+          : tr("起始拍必须落在固定网格上", "The start beat must align to the fixed grid."));
+      return;
+    }
     commit((current) => updateNote(current, selectedNote.id, patch));
   }
 
+  function chooseAccidental(value: Accidental) {
+    setAccidental(value);
+    if (selectedNote?.midi === null || !selectedNote) return;
+    patchSelected({ spelling: midiSpelling(selectedNote.midi, draft.notation?.keySignature, value) });
+  }
+
+  function changeTimeSignature(patch: Partial<PitchScore["timeSignature"]>) {
+    const next = { ...draft, timeSignature: { ...draft.timeSignature, ...patch } };
+    const crossesBarline = next.notes.some((note) => notePlacementIssue(next, note, note.id) === "crosses-measure");
+    if (crossesBarline) {
+      setToast(tr("这个拍号会让已有音符越过小节线，请先调整这些音符", "That time signature would make existing notes cross a barline. Adjust those notes first."));
+      return;
+    }
+    commit(next);
+  }
+
   return (
-    <div className="composer-shell">
+    <div
+      className="composer-shell"
+      onFocusCapture={(event) => {
+        const target = event.target as HTMLElement;
+        if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable) setEntryMode(false);
+      }}
+    >
       <header className="composer-topbar">
         <div className="composer-document">
           <button className="icon-button back" onClick={onClose} aria-label={tr("返回练习室", "Back to practice")}><ArrowLeft /></button>
@@ -880,6 +931,9 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
         <div className="composer-actions">
           <button className="icon-button" disabled={!past.length} onClick={undo} title={tr("撤销（⌘Z）", "Undo (⌘Z)")}><Undo2 /></button>
           <button className="icon-button" disabled={!future.length} onClick={redo} title={tr("重做（⇧⌘Z）", "Redo (⇧⌘Z)")}><Redo2 /></button>
+          <button className={`text-button entry-mode-toggle ${entryMode ? "active" : ""}`} onClick={() => setEntryMode((value) => !value)}>
+            <Keyboard /> {entryMode ? tr("结束录入（Enter）", "End entry (Enter)") : tr("开始录入（Enter）", "Start entry (Enter)")}
+          </button>
           <div className="composer-language">
             <Languages />
             <select value={locale} onChange={(event) => setLocale(event.target.value as "zh-CN" | "en")} aria-label={tr("界面语言", "Interface language")}>
@@ -892,7 +946,7 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
           <input ref={notationInputRef} type="file" accept=".json,.singright.json,.musicxml,.xml,application/json,application/xml,text/xml" hidden onChange={(event) => void importNotation(event.target.files?.[0])} />
           <div className="export-menu">
             <button className="text-button"><Download /> {tr("导出", "Export")}</button>
-            <div><button onClick={() => exportScore("json")}>SingRight JSON<small>{tr("继续编辑与练唱", "Keep editing and practicing")}</small></button><button onClick={() => exportScore("musicxml")}>MusicXML<small>MuseScore / Sibelius</small></button><button onClick={() => exportScore("midi")}>{tr("标准 MIDI", "Standard MIDI")}<small>{tr("用于编曲软件", "For music production tools")}</small></button></div>
+            <div><button onClick={() => void exportScore("json")}>SingRight JSON<small>{tr("继续编辑与练唱", "Keep editing and practicing")}</small></button><button onClick={() => void exportScore("musicxml")}>MusicXML<small>MuseScore / Sibelius</small></button><button onClick={() => void exportScore("midi")}>{tr("标准 MIDI", "Standard MIDI")}<small>{tr("用于编曲软件", "For music production tools")}</small></button></div>
           </div>
           <button className="save-button" onClick={() => save(false)}><Save /> {tr("保存", "Save")}</button>
           <button className="practice-button" onClick={() => save(true)}><Headphones /> {tr("保存并练习", "Save & practice")}</button>
@@ -902,24 +956,18 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
       <div className="composer-body">
         <aside className="composer-toolbox">
           <div className="tool-section">
-            <span className="tool-section-title">{tr("输入工具", "Input tools")}</span>
-            <div className="tool-mode-grid">
-              <button className={tool === "select" ? "active" : ""} onClick={() => setTool("select")}><MousePointer2 /><span>{tr("选择", "Select")}</span><small>{tr("移动光标", "Move cursor")}</small></button>
-              <button className={tool === "note" ? "active" : ""} onClick={() => setTool("note")}><Music /><span>{tr("音符", "Note")}</span><small>{tr("点击谱面", "Click score")}</small></button>
-              <button className={tool === "rest" ? "active" : ""} onClick={() => setTool("rest")}><span className="rest-tool">0</span><span>{tr("休止", "Rest")}</span><small>{tr("填充空拍", "Fill silence")}</small></button>
-            </div>
-          </div>
-
-          <div className="tool-section numeral-input-section">
-            <div className="tool-section-title"><span>{tr("简谱录入", "Numbered input")}</span><small>{tr("快捷键 0–7", "Keys 0–7")}</small></div>
-            <div className="numeral-input-grid">
-              {[1, 2, 3, 4, 5, 6, 7].map((degree) => <button key={degree} onClick={() => addNumeral(degree)}><strong>{degree}</strong><small>{midiToNoteName(((inputOctave + 1) * 12) + (((draft.tuning.tonicMidi % 12) + 12) % 12) + [0, 2, 4, 5, 7, 9, 11][degree - 1] + accidental)}</small></button>)}
-              <button className="numeral-rest" onClick={() => addNumeral(0)}><strong>0</strong><small>{tr("休止", "Rest")}</small></button>
-            </div>
+            <div className="tool-section-title"><span>{tr("键盘录入", "Keyboard entry")}</span><small>Enter / Esc</small></div>
+            <button className={`keyboard-entry-card ${entryMode ? "active" : ""}`} onClick={() => setEntryMode((value) => !value)}>
+              <Keyboard />
+              <span>
+                <strong>{entryMode ? tr("录入已开启", "Entry is active") : tr("录入已关闭", "Entry is inactive")}</strong>
+                <small>{entryMode ? tr("现在按键会写入曲谱", "Notation keys now write to the score") : tr("按 Enter 开始，Esc 结束", "Press Enter to start, Esc to stop")}</small>
+              </span>
+            </button>
           </div>
 
           <div className="tool-section">
-            <div className="tool-section-title"><span>{tr("音符时值", "Duration")}</span><small>{notationView === "staff" ? tr("快捷键 1–5", "Keys 1–5") : tr("点击选择", "Click to select")}</small></div>
+            <div className="tool-section-title"><span>{tr("音符时值", "Duration")}</span><small>{tr("快捷键 1–5", "Keys 1–5")}</small></div>
             <div className="duration-grid">
               {DURATION_OPTIONS.map((option) => (
                 <button
@@ -927,7 +975,7 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
                   className={duration === option.beats ? "active" : ""}
                   onClick={() => setDuration(option.beats)}
                   title={tr(`${option.label}（${option.shortcut}）`, `${option.beats} beats`)}
-                ><strong>{option.glyph}</strong><span>{locale === "zh-CN" ? option.label.replace("音符", "") : `${option.beats}`}</span>{notationView === "staff" && <kbd>{option.shortcut}</kbd>}</button>
+                ><strong>{option.glyph}</strong><span>{locale === "zh-CN" ? option.label.replace("音符", "") : `${option.beats}`}</span><kbd>{option.shortcut}</kbd></button>
               ))}
             </div>
             <button className={`dot-toggle ${dotted ? "active" : ""}`} onClick={() => setDotted((value) => !value)}>
@@ -936,14 +984,14 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
           </div>
 
           <div className="tool-section">
-            <span className="tool-section-title">{tr("升降记号", "Accidental")}</span>
+            <div className="tool-section-title"><span>{tr("黑键记谱方式", "Black-key spelling")}</span><small>{tr("不改变实际音高", "Pitch stays unchanged")}</small></div>
             <div className="accidental-grid">
               {([
-                { value: -1, glyph: "♭", label: tr("降", "Flat") },
-                { value: 0, glyph: "♮", label: tr("还原", "Natural") },
-                { value: 1, glyph: "♯", label: tr("升", "Sharp") },
+                { value: -1, glyph: "♭", label: tr("降号拼写", "Use flats") },
+                { value: 0, glyph: "♮", label: tr("跟随调号", "Follow key") },
+                { value: 1, glyph: "♯", label: tr("升号拼写", "Use sharps") },
               ] as const).map((item) => (
-                <button className={accidental === item.value ? "active" : ""} key={item.value} onClick={() => setAccidental(item.value)}>
+                <button className={accidental === item.value ? "active" : ""} key={item.value} onClick={() => chooseAccidental(item.value)}>
                   <strong>{item.glyph}</strong><span>{item.label}</span>
                 </button>
               ))}
@@ -951,37 +999,31 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
           </div>
 
           <div className="tool-section piano-section">
-            <div className="tool-section-title"><span>{tr("字母键盘输入", "Letter input")}</span><small>A–G</small></div>
+            <div className="tool-section-title"><span>{tr("十二音键盘", "Chromatic keyboard")}</span><small>Q W E R T Y U I O P [ ]</small></div>
             <div className="octave-stepper">
               <button onClick={() => setInputOctave((value) => Math.max(1, value - 1))}><Minus /></button>
-              <span>{tr("八度", "Octave")} <strong>{inputOctave}</strong></span>
+              <span>{tr("当前八度组", "Current octave")} <strong>{inputOctave}</strong><small> ↑ / ↓</small></span>
               <button onClick={() => setInputOctave((value) => Math.min(7, value + 1))}><Plus /></button>
             </div>
-            <div className="mini-piano">
-              {PITCH_CLASSES.map((key) => {
-                const black = key.accidental !== 0;
-                return (
-                  <button
-                    className={black ? "black" : "white"}
-                    key={key.label}
-                    onClick={() => addNote(midiFromStep(key.step, inputOctave, key.accidental))}
-                    aria-label={tr(`输入 ${key.label}${inputOctave}`, `Enter ${key.label}${inputOctave}`)}
-                  >{key.label}</button>
-                );
+            <div className="chromatic-key-map">
+              {CHROMATIC_KEYBOARD.map((item) => {
+                const midi = (inputOctave + 1) * 12 + item.semitone;
+                return <span className={item.semitone % 12 === 1 || item.semitone % 12 === 3 || item.semitone % 12 === 6 || item.semitone % 12 === 8 || item.semitone % 12 === 10 ? "black" : ""} key={item.code}><kbd>{item.key}</kbd><strong>{midiSpelling(midi, draft.notation?.keySignature, accidental)}</strong></span>;
               })}
             </div>
+            <div className="rest-key"><kbd>Space</kbd><strong>{restGlyphForBeats(effectiveDuration)}</strong><span>{tr("输入当前时值的休止符", "Enter a rest with the current duration")}</span></div>
           </div>
 
           <div className="shortcut-note">
             <Keyboard />
-            <div><strong>{tr("高效录入", "Keyboard workflow")}</strong><span>{tr("A–G 输入音符 · 0–7 输入简谱<br />方向键选音/移调 · 空格试听", "A–G enter notes · 0–7 numbered input<br />Arrows select/transpose · Space plays")}</span></div>
+            <div><strong>{tr("光标与删除", "Cursor and deletion")}</strong><span>{tr("←/→ 移动固定槽 · ⇧←/→ 跨小节<br />Home/End 到小节边界 · Backspace 删除前一个音", "←/→ move one fixed slot · ⇧←/→ move one bar<br />Home/End bar edges · Backspace removes the previous note")}</span></div>
           </div>
         </aside>
 
         <main className="composer-workspace">
           <section className="score-setup-bar">
             <label><span>{tr("速度", "Tempo")}</span><div><input type="number" min="20" max="300" value={draft.tempo.bpm} onChange={(event) => commit((current) => ({ ...current, tempo: { bpm: Math.max(20, Math.min(300, Number(event.target.value))) } }))} /><small>BPM</small></div></label>
-            <label><span>{tr("拍号", "Time")}</span><div><select value={draft.timeSignature.beats} onChange={(event) => commit((current) => ({ ...current, timeSignature: { ...current.timeSignature, beats: Number(event.target.value) } }))}>{[2, 3, 4, 5, 6, 7, 9, 12].map((value) => <option key={value}>{value}</option>)}</select><b>/</b><select value={draft.timeSignature.beatUnit} onChange={(event) => commit((current) => ({ ...current, timeSignature: { ...current.timeSignature, beatUnit: Number(event.target.value) as 1 | 2 | 4 | 8 | 16 } }))}>{[2, 4, 8, 16].map((value) => <option key={value}>{value}</option>)}</select></div></label>
+            <label><span>{tr("拍号", "Time")}</span><div><select value={draft.timeSignature.beats} onChange={(event) => changeTimeSignature({ beats: Number(event.target.value) })}>{[2, 3, 4, 5, 6, 7, 9, 12].map((value) => <option key={value}>{value}</option>)}</select><b>/</b><select value={draft.timeSignature.beatUnit} onChange={(event) => changeTimeSignature({ beatUnit: Number(event.target.value) as 1 | 2 | 4 | 8 | 16 })}>{[2, 4, 8, 16].map((value) => <option key={value}>{value}</option>)}</select></div></label>
             <label className="key-field"><span>{tr("调号", "Key")}</span><select value={draft.notation?.keySignature ?? 0} onChange={(event) => commit((current) => ({ ...current, notation: { clef: current.notation?.clef ?? "treble", keySignature: Number(event.target.value) } }))}>{KEY_SIGNATURES.map((key) => <option key={key.fifths} value={key.fifths}>{localizedKeyName(key.name, locale)}</option>)}</select></label>
             <label><span>{tr("谱号", "Clef")}</span><select value={draft.notation?.clef ?? "treble"} onChange={(event) => commit((current) => ({ ...current, notation: { keySignature: current.notation?.keySignature ?? 0, clef: event.target.value as Clef } }))}><option value="treble">𝄞 {tr("高音谱号", "Treble")}</option><option value="bass">𝄢 {tr("低音谱号", "Bass")}</option></select></label>
             <div className="setup-summary"><Grid2X2 /><span><strong>{measureCount}</strong> {tr("小节", "measures")}</span><span><strong>{draft.notes.length}</strong> {tr("音符", "notes")}</span></div>
@@ -1010,6 +1052,7 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
                   ["split", tr("对照", "Split")],
                 ] as Array<[NotationView, string]>).map(([value, label]) => <button className={notationView === value ? "active" : ""} key={value} onClick={() => setNotationView(value)}>{label}</button>)}
               </div>
+              <button className={`entry-status-button ${entryMode ? "active" : ""}`} onClick={() => setEntryMode((value) => !value)}><Keyboard /> {entryMode ? tr("录入中 · Enter 结束", "Entering · Enter to stop") : tr("Enter 开始键盘录入", "Enter to start entry")}</button>
               <div className="zoom-control"><span>{tr("谱面", "Zoom")}</span><button onClick={() => setZoom((value) => Math.max(1, value - 1))}><Minus /></button><strong>{Math.round((zoom / 3) * 100)}%</strong><button onClick={() => setZoom((value) => Math.min(5, value + 1))}><Plus /></button></div>
             </div>
             <div className="paper-title">
@@ -1022,29 +1065,14 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
                 cursorBeat={cursorBeat}
                 playbackBeat={playbackBeat}
                 zoom={zoom}
-                tool={tool}
-                accidental={accidental}
-                onCanvasAction={(beat, midi) => addNote(tool === "rest" ? null : midi, beat)}
-                onSelect={(id) => {
-                  setSelectedId(id);
-                  const note = draft.notes.find((candidate) => candidate.id === id);
-                  if (note) setCursorBeat(note.beat);
-                }}
-                onMoveCursor={setCursorBeat}
               />}
             {(notationView === "numbered" || notationView === "split") && <NumberedScoreCanvas
               score={draft}
               selectedId={selectedId}
               cursorBeat={cursorBeat}
               playbackBeat={playbackBeat}
-              onSelect={(id) => {
-                setSelectedId(id);
-                const note = draft.notes.find((candidate) => candidate.id === id);
-                if (note) setCursorBeat(note.beat);
-              }}
-              onMoveCursor={setCursorBeat}
             />}
-            <div className="paper-footer"><span>{tr("单声部旋律谱 · 五线谱点谱，或用 0–7 快速录入简谱", "Monophonic melody · Click the staff or use 0–7 for numbered entry")}</span><strong>{tr(`第 ${Math.floor(cursorBeat / draft.timeSignature.beats) + 1} 小节 · 第 ${(cursorBeat % draft.timeSignature.beats) + 1} 拍`, `Bar ${Math.floor(cursorBeat / draft.timeSignature.beats) + 1} · Beat ${(cursorBeat % draft.timeSignature.beats) + 1}`)}</strong></div>
+            <div className="paper-footer"><span>{tr("单声部固定槽录入 · 谱面不响应点击 · 只由键盘光标控制", "Monophonic fixed-slot entry · The score is display-only and controlled by the keyboard cursor")}</span><strong>{tr(`第 ${Math.floor(cursorBeat / measureBeats) + 1} 小节 · 第 ${(cursorBeat % measureBeats) + 1} 拍`, `Bar ${Math.floor(cursorBeat / measureBeats) + 1} · Beat ${(cursorBeat % measureBeats) + 1}`)}</strong></div>
           </section>
 
           <section className={`audio-guide-panel ${audioPanelOpen ? "open" : ""}`}>
@@ -1109,26 +1137,26 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
           {selectedNote ? (
             <section className="note-inspector">
               <div className="selected-note-card">
-                <div className={selectedNote.midi === null ? "rest" : ""}>{selectedNote.midi === null ? "0" : "♩"}</div>
-                <span><strong>{selectedNote.midi === null ? tr("休止符", "Rest") : midiToNoteName(selectedNote.midi)}</strong><small>{locale === "zh-CN" ? durationName(selectedNote.durationBeats) : `${selectedNote.durationBeats} beats`} · {tr(`第 ${selectedNote.beat + 1} 拍`, `Beat ${selectedNote.beat + 1}`)}</small></span>
+                <div className={selectedNote.midi === null ? "rest" : ""}>{selectedNote.midi === null ? restGlyphForBeats(selectedNote.durationBeats) : "♩"}</div>
+                <span><strong>{selectedNote.midi === null ? tr("休止符", "Rest") : selectedNote.spelling || midiSpelling(selectedNote.midi, draft.notation?.keySignature)}</strong><small>{locale === "zh-CN" ? durationName(selectedNote.durationBeats) : `${selectedNote.durationBeats} beats`} · {tr(`第 ${selectedNote.beat + 1} 拍`, `Beat ${selectedNote.beat + 1}`)}</small></span>
               </div>
               {selectedNote.midi !== null && (
                 <label><span>{tr("音高", "Pitch")}</span><div className="stepper wide"><button onClick={() => {
                   const midi = Math.max(0, selectedNote.midi! - 1);
-                  patchSelected({ midi, spelling: midiSpelling(midi, draft.notation?.keySignature), numeral: numeralForMidi(midi, draft.tuning.tonicMidi) });
-                }}><Minus /></button><strong>{midiToNoteName(selectedNote.midi)}</strong><button onClick={() => {
+                  patchSelected({ midi, spelling: midiSpelling(midi, draft.notation?.keySignature, accidental), numeral: numeralForMidi(midi, draft.tuning.tonicMidi) });
+                }}><Minus /></button><strong>{selectedNote.spelling || midiSpelling(selectedNote.midi, draft.notation?.keySignature)}</strong><button onClick={() => {
                   const midi = Math.min(127, selectedNote.midi! + 1);
-                  patchSelected({ midi, spelling: midiSpelling(midi, draft.notation?.keySignature), numeral: numeralForMidi(midi, draft.tuning.tonicMidi) });
+                  patchSelected({ midi, spelling: midiSpelling(midi, draft.notation?.keySignature, accidental), numeral: numeralForMidi(midi, draft.tuning.tonicMidi) });
                 }}><Plus /></button></div></label>
               )}
-              <label><span>{tr("起始拍", "Start beat")}</span><input type="number" min="0" step="0.25" value={selectedNote.beat} onChange={(event) => patchSelected({ beat: Math.max(0, Number(event.target.value)) })} /></label>
+              <label><span>{tr("起始拍", "Start beat")}</span><input type="number" min="0" step={EDIT_GRID_BEATS} value={selectedNote.beat} onChange={(event) => patchSelected({ beat: Math.max(0, Number(event.target.value)) })} /></label>
               <label><span>{tr("时值", "Duration")}</span><select value={selectedNote.durationBeats} onChange={(event) => patchSelected({ durationBeats: Number(event.target.value) })}>{DURATION_OPTIONS.flatMap((option) => [<option key={option.beats} value={option.beats}>{locale === "zh-CN" ? option.label : `${option.beats} beats`}</option>, <option key={`${option.beats}-dot`} value={option.beats * 1.5}>{locale === "zh-CN" ? `附点${option.label} · ${option.beats * 1.5} 拍` : `Dotted · ${option.beats * 1.5} beats`}</option>])}</select></label>
               {selectedNote.midi !== null && <label><span>{tr("简谱音级", "Numbered degree")}</span><input value={selectedNote.numeral ?? ""} placeholder={numeralForMidi(selectedNote.midi, draft.tuning.tonicMidi)} onChange={(event) => patchSelected({ numeral: event.target.value })} /></label>}
               <label><span>{tr("歌词", "Lyric")}</span><input value={selectedNote.lyric ?? ""} placeholder={tr("当前音对应的字", "Syllable for this note")} onChange={(event) => patchSelected({ lyric: event.target.value })} /></label>
               <div className="note-actions"><button onClick={duplicateSelected}><Copy /> {tr("复制到下一拍", "Duplicate next")}</button><button className="danger" onClick={removeSelected}><Trash2 /> {tr("删除", "Delete")}</button></div>
             </section>
           ) : (
-            <div className="inspector-empty"><MousePointer2 /><strong>{tr("选择一个音符", "Select a note")}</strong><span>{tr("点击五线谱或简谱中的音符，在这里精确编辑音高、拍点、时值、简谱音级和歌词。", "Click a note in either notation view to edit pitch, timing, duration, numbered degree, and lyrics.")}</span></div>
+            <div className="inspector-empty"><Keyboard /><strong>{tr("移动到一个音符", "Move to a note")}</strong><span>{tr("开启录入后用方向键移动橙色光标。光标位于音符起点时，可在这里精确编辑歌词和属性。", "Start keyboard entry and move the orange cursor with the arrow keys. When it reaches a note start, edit lyrics and properties here.")}</span></div>
           )}
 
           <section className="tuning-fields">
@@ -1138,8 +1166,8 @@ export default function ScoreEditor({ initialScore, onCommit, onClose }: ScoreEd
           </section>
 
           <div className="editor-help">
-            <strong>{tr("不会写五线谱？", "New to staff notation?")}</strong>
-            <p>{tr("切换到“简谱”，用 1–7 输入音级、0 输入休止；也可在五线谱上点谱。橙色光标会自动前进。", "Switch to Numbered and use 1–7 for scale degrees or 0 for rests; you can also click the staff. The orange cursor advances automatically.")}</p>
+            <strong>{tr("键盘录入顺序", "Keyboard entry sequence")}</strong>
+            <p>{tr("Enter 开始 → 1–5 选时值 → Q 到 ] 输入十二音；↑/↓ 换八度，空格输入标准休止符。每次输入后光标会自动前进，且永远不能超出当前小节容量。", "Press Enter → choose duration with 1–5 → enter one of 12 pitches with Q through ]. Use ↑/↓ for octave and Space for a proper rest. The cursor advances automatically and never exceeds the bar capacity.")}</p>
           </div>
         </aside>
       </div>

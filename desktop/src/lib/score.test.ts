@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import scale from "../data/ascending-scale.json";
+import { midiToFrequency, referenceHzForAnchor } from "./music";
 import { buildSessionResult, scoreDurationSeconds, validateScore } from "./score";
 
 describe("score utilities", () => {
@@ -23,5 +24,11 @@ describe("score utilities", () => {
       }));
     });
     expect(buildSessionResult(score, frames, 0, 30, "test").score).toBe(100);
+  });
+
+  it("anchors later intervals to the exact sung first-note frequency", () => {
+    const reference = referenceHzForAnchor(250, 60);
+    expect(midiToFrequency(60, reference)).toBeCloseTo(250, 8);
+    expect(midiToFrequency(72, reference)).toBeCloseTo(500, 8);
   });
 });

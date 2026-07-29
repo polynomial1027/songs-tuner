@@ -1,5 +1,5 @@
 import type { PitchScore, ScoreNote } from "../types";
-import { createEmptyScore, makeNoteId, midiSpelling, parseSpelling } from "./composer";
+import { createEmptyScore, makeNoteId, measureLengthBeats, midiSpelling, parseSpelling } from "./composer";
 import { validateScore } from "./score";
 
 const TYPE_BY_BEATS: Array<[number, string]> = [
@@ -23,7 +23,7 @@ function typeForDuration(beats: number): { type: string; dotted: boolean } {
 
 export function scoreToMusicXml(score: PitchScore): string {
   const divisions = 480;
-  const beatsPerMeasure = score.timeSignature.beats;
+  const beatsPerMeasure = measureLengthBeats(score);
   const totalMeasures = Math.max(1, Math.ceil(
     score.notes.reduce((end, note) => Math.max(end, note.beat + note.durationBeats), 0) / beatsPerMeasure,
   ));
@@ -75,6 +75,7 @@ export function musicXmlToScore(xml: string): PitchScore {
   const divisions = Number(textOf(firstMeasure ?? documentNode.documentElement, "divisions")) || 1;
   const beats = Number(textOf(firstMeasure ?? documentNode.documentElement, "time beats")) || 4;
   const beatUnit = Number(textOf(firstMeasure ?? documentNode.documentElement, "time beat-type")) || 4;
+  const beatsPerMeasure = beats * (4 / beatUnit);
   const bpm = Number(firstMeasure?.querySelector("sound")?.getAttribute("tempo"))
     || Number(textOf(firstMeasure ?? documentNode.documentElement, "per-minute"))
     || 88;
@@ -83,7 +84,7 @@ export function musicXmlToScore(xml: string): PitchScore {
   const notes: ScoreNote[] = [];
   let absoluteBeat = 0;
   documentNode.querySelectorAll("part measure").forEach((measure, measureIndex) => {
-    let cursor = measureIndex * beats;
+    let cursor = measureIndex * beatsPerMeasure;
     measure.querySelectorAll(":scope > note, :scope > forward, :scope > backup").forEach((node) => {
       const duration = (Number(textOf(node, "duration")) || divisions) / divisions;
       if (node.tagName === "forward") {
@@ -91,7 +92,7 @@ export function musicXmlToScore(xml: string): PitchScore {
         return;
       }
       if (node.tagName === "backup") {
-        cursor = Math.max(measureIndex * beats, cursor - duration);
+        cursor = Math.max(measureIndex * beatsPerMeasure, cursor - duration);
         return;
       }
       if (node.querySelector("chord")) return;
@@ -125,7 +126,7 @@ export function musicXmlToScore(xml: string): PitchScore {
       id: `musicxml-${Date.now()}`,
       title,
       artist,
-      description: `从 MusicXML 导入 · ${Math.ceil(absoluteBeat / beats)} 小节`,
+      description: `从 MusicXML 导入 · ${Math.ceil(absoluteBeat / beatsPerMeasure)} 小节`,
     },
     tempo: { bpm: Math.max(20, Math.min(300, bpm)) },
     timeSignature: { beats, beatUnit },
